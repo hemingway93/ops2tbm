@@ -1,83 +1,24 @@
+# =========================
+# OPS2TBM (no-OCR version)
+# - 안정 배포용: 텍스트 PDF / 텍스트 입력 지원
+# - 이미지/스캔 PDF는 현재 미지원(안내 메시지)
+# =========================
 import io
 import re
-import regex as rxx
 from typing import List, Tuple
 
 import streamlit as st
 from PIL import Image
 from docx import Document
 from docx.shared import Pt
-import pypdfium2 as pdfium
 
-# =========================
-# [변경점] RapidOCR 안전 임포트
-# - ImportError가 나도 앱은 '텍스트 붙여넣기' 경로로 동작
-# =========================
-try:
-    from rapidocr_onnxruntime import RapidOCR
-    _OCR_AVAILABLE = True
-except Exception:
-    RapidOCR = None  # type: ignore
-    _OCR_AVAILABLE = False
+# [변경점] OCR 제거: pdfminer.six로 텍스트 PDF만 파싱
+from pdfminer.high_level import extract_text as pdf_extract_text
 
+import regex as rxx
 
 # ----------------------------
-# Caching (모델/리소스)
-# ----------------------------
-@st.cache_resource(show_spinner=False)
-def get_ocr():
-    if not _OCR_AVAILABLE:
-        return None
-    return RapidOCR()
-
-
-# ----------------------------
-# Util: PDF 페이지를 PIL 이미지 리스트로 변환
-# ----------------------------
-def pdf_to_images(file_bytes: bytes, scale: float = 2.0) -> List[Image.Image]:
-    pdf = pdfium.PdfDocument(io.BytesIO(file_bytes))
-    images = []
-    for page in pdf:
-        pil = page.render(scale=scale).to_pil()
-        images.append(pil)
-    return images
-
-
-# ----------------------------
-# OCR: PIL 이미지 -> 텍스트
-# ----------------------------
-def ocr_image(pil_img: Image.Image, ocr) -> str:
-    if ocr is None:
-        return ""
-    img = pil_img.convert("RGB")
-    result, _ = ocr(img)
-    if not result:
-        return ""
-    lines = [item[1] for item in result]
-    return "\n".join(lines)
-
-
-# ----------------------------
-# 파일에서 텍스트 추출 (PDF/이미지/텍스트)
-# ----------------------------
-def extract_text(uploaded_file, ocr) -> str:
-    filename = uploaded_file.name.lower()
-    data = uploaded_file.read()
-
-    if filename.endswith(".pdf"):
-        images = pdf_to_images(data, scale=2.0)
-        texts = [ocr_image(im, ocr) for im in images]
-        return "\n".join(texts).strip()
-
-    try:
-        pil = Image.open(io.BytesIO(data))
-        return ocr_image(pil, ocr)
-    except Exception:
-        return ""
-
-
-# ----------------------------
-# 전처리: 줄바꿈/공백/머리말 정리
+# 전처리 유틸
 # ----------------------------
 def clean_text(text: str) -> str:
     if not text:
@@ -87,14 +28,6 @@ def clean_text(text: str) -> str:
     text = re.sub(r"\n{2,}", "\n", text)
     text = re.sub(r"(출처|자료|작성|페이지)\s*[:：].*", "", text, flags=re.IGNORECASE)
     return text.strip()
-
-
-# ----------------------------
-# 핵심문장 추출 (간단 규칙 기반)
-# ----------------------------
-KW_OVERVIEW = ["개요", "사례", "사고", "배경", "요약", "현황"]
-KW_CAUSE = ["원인", "이유", "문제점", "부적정", "미비", "위험요인"]
-KW_RULES = ["예방", "대책", "수칙", "점검", "조치", "확인", "준수", "관리"]
 
 def split_sentences_ko(text: str) -> List[str]:
     sents = rxx.split(r"(?<=[\.!?…]|다\.|다!|다\?)\s+|\n", text)
@@ -108,8 +41,7 @@ def pick_sentences(sents: List[str], keywords: List[str], limit: int) -> List[st
         if score > 0:
             scored.append((score, len(s), s))
     scored.sort(key=lambda x: (-x[0], x[1]))
-    out = [s for _, _, s in scored[:limit]]
-    return out
+    return [s for _, _, s in scored[:limit]]
 
 def bulletize(lines: List[str]) -> List[str]:
     blt = []
@@ -120,10 +52,13 @@ def bulletize(lines: List[str]) -> List[str]:
         blt.append(s)
     return blt
 
+# ----------------------------
+# 키워드 사전
+# ----------------------------
+KW_OVERVIEW = ["개요", "사례", "사고", "배경", "요약", "현황"]
+KW_CAUSE = ["원인", "이유", "문제점", "부적정", "미비", "위험요인"]
+KW_RULES = ["예방", "대책", "수칙", "점검", "조치", "확인", "준수", "관리"]
 
-# ----------------------------
-# 안전 상수 (부족시 자동 보강)
-# ----------------------------
 SAFETY_CONSTANTS = [
     "선조치 후작업(안전설비·난간·라이프라인 설치 후 작업)",
     "감시자 배치 및 위험구역 출입 통제",
@@ -138,9 +73,8 @@ ROOF_EXTRAS = [
     "기상(강풍·우천) 불량 시 작업 중지",
 ]
 
-
 # ----------------------------
-# 템플릿 합성: TBM 대본 만들기
+# TBM 대본 생성
 # ----------------------------
 def make_tbm_script(raw_text: str) -> Tuple[str, dict]:
     text = clean_text(raw_text)
@@ -170,10 +104,10 @@ def make_tbm_script(raw_text: str) -> Tuple[str, dict]:
 
     lines = []
     lines.append(f"🦺 TBM 대본 – 「{title}」\n")
-    lines.append("◎ 인사 및 도입\n- 오늘 TBM에서는 OPS 자료를 바탕으로 최근 재해 위험요인을 짚고, 우리 현장에서 바로 적용할 수 있는 안전수칙을 공유합니다.\n")
+    lines.append("◎ 인사 및 도입\n- OPS 자료를 바탕으로 재해 위험요인을 짚고, 우리 현장에서 바로 적용할 수 있는 안전수칙을 공유합니다.\n")
 
     lines.append("◎ 1. 사고 개요")
-    for s in overview or ["(OPS에서 개요를 찾지 못했습니다. 일반 개요로 대체합니다.)"]:
+    for s in (overview or ["(OPS에서 개요를 찾지 못했습니다. 일반 개요로 대체합니다.)"]):
         lines.append(f"- {s}")
 
     lines.append("\n◎ 2. 사고 원인")
@@ -206,7 +140,6 @@ def make_tbm_script(raw_text: str) -> Tuple[str, dict]:
     }
     return script, parts
 
-
 # ----------------------------
 # 내보내기: TXT / DOCX
 # ----------------------------
@@ -225,37 +158,44 @@ def to_docx_bytes(text: str) -> bytes:
     buf.seek(0)
     return buf.read()
 
+# ----------------------------
+# PDF 텍스트 추출 (텍스트 PDF만)
+# ----------------------------
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    try:
+        return pdf_extract_text(io.BytesIO(file_bytes)) or ""
+    except Exception:
+        return ""
 
 # ----------------------------
 # Streamlit UI
 # ----------------------------
 st.set_page_config(page_title="OPS2TBM", page_icon="🦺", layout="wide")
-st.title("🦺 OPS2TBM — OPS/포스터를 TBM 대본으로 자동 변환")
+st.title("🦺 OPS2TBM — OPS/포스터를 TBM 대본으로 자동 변환 (텍스트 PDF/텍스트 입력 지원)")
 
 st.markdown("""
 **사용법**
-1) OPS 파일 업로드(PDF/PNG/JPG) 또는 텍스트 붙여넣기  
-2) 대본 생성 버튼 클릭  
-3) .txt / .docx 다운로드
+1) **텍스트가 포함된 PDF 업로드** 또는 **OPS 텍스트 붙여넣기**  
+2) **TBM 대본 생성** 클릭  
+3) **.txt / .docx 다운로드**
+
+> ⚠️ 이미지/스캔 PDF는 현재 인식(ocr) 미지원입니다. 그 경우 OPS 본문을 텍스트로 붙여넣어 주세요.
 """)
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    uploaded = st.file_uploader("OPS 파일 업로드 (PDF/PNG/JPG)", type=["pdf", "png", "jpg", "jpeg"])
+    uploaded = st.file_uploader("OPS 파일 업로드 (PDF만 지원)", type=["pdf"])
     manual_text = st.text_area("또는 OPS 텍스트 직접 붙여넣기", height=220)
-
-    # [변경점] OCR 준비
-    if "ocr_model" not in st.session_state:
-        st.session_state.ocr_model = get_ocr()
-
-    if not _OCR_AVAILABLE:
-        st.info("🔎 현재 환경에서 OCR 모듈을 불러오지 못했습니다. 우선 **텍스트 붙여넣기**로 생성해보세요. (배포 환경 세팅 후 자동 활성화)")
 
     extracted = ""
     if uploaded:
-        with st.spinner("파일에서 텍스트 추출 중..."):
-            extracted = extract_text(uploaded, st.session_state.ocr_model)
+        with st.spinner("PDF 텍스트 추출 중... (텍스트 PDF만 지원)"):
+            data = uploaded.read()
+            extracted = extract_text_from_pdf(data)
+
+            if not extracted.strip():
+                st.warning("이 PDF는 **이미지/스캔**일 가능성이 큽니다. 우측에 **텍스트 붙여넣기**로 진행해 주세요.")
 
     base_text = manual_text.strip() if manual_text.strip() else extracted.strip()
 
@@ -265,7 +205,7 @@ with col1:
 with col2:
     if st.button("🛠️ TBM 대본 생성", type="primary", use_container_width=True):
         if not edited_text.strip():
-            st.warning("텍스트가 비어 있습니다. 파일 업로드 또는 텍스트 입력 후 시도하세요.")
+            st.warning("텍스트가 비어 있습니다. PDF 업로드(텍스트 PDF) 또는 텍스트 입력 후 시도하세요.")
         else:
             script, parts = make_tbm_script(edited_text)
             st.success("대본 생성 완료!")
@@ -273,4 +213,4 @@ with col2:
             st.download_button("⬇️ .txt 다운로드", data=to_txt_bytes(script), file_name="tbm_script.txt")
             st.download_button("⬇️ .docx 다운로드", data=to_docx_bytes(script), file_name="tbm_script.docx")
 
-st.caption("⚙️ OCR: RapidOCR(+OpenCV headless) • PDF: pypdfium2 • 배포: Streamlit Cloud")
+st.caption("현재 버전: OCR 미포함(클라우드 안정화 목적). 텍스트 PDF/붙여넣기 지원.")
