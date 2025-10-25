@@ -16,14 +16,7 @@ from typing import List, Tuple, Dict
 import streamlit as st
 from docx import Document
 from docx.shared import Pt
-from pdfminer_high_level import extract_text as pdf_extract_text  # type: ignore
-# 일부 환경에서 import 경로 충돌 방지용 별칭 (pdfminer.six)
-try:
-    from pdfminer.high_level import extract_text as _et
-    pdf_extract_text = _et
-except Exception:
-    pass
-
+from pdfminer.high_level import extract_text as pdf_extract_text  # ← 올바른 경로로 수정!
 import pypdfium2 as pdfium
 import numpy as np
 import regex as rxx
@@ -38,9 +31,9 @@ if "uploader_key" not in st.session_state:
 # 공통 유틸
 # ----------------------------
 HEADER_HINTS = [
-    # 헤더/슬로건으로 자주 등장하는 표현들(본문으로 쓰면 어색)
+    # 헤더/슬로건으로 자주 등장 (본문으로 쓰면 어색)
     "예방조치", "5대 기본수칙", "응급조치", "민감군", "체감온도",
-    # 표준 캠페인 슬로건(오탈자였던 '휴휴식식' 대신 표준 표현 반영)
+    # 표준 캠페인 문구 반영
     "물·그늘·휴식", "물, 그늘, 휴식", "물 그늘 휴식",
     "물·바람·휴식", "물, 바람, 휴식", "물 바람 휴식",
     "위기탈출 안전보건 앱", "체감온도 계산기"
@@ -79,8 +72,7 @@ def read_pdf_text(file_bytes: bytes) -> str:
 def split_sentences_ko(text: str) -> List[str]:
     raw = rxx.split(r"(?<=[\.!\?]|다\.)\s+|\n+", text)
     sents = [s.strip(" -•●▪▶▷\t") for s in raw if s and len(s.strip()) > 1]
-    # 너무 짧거나 기호성 문장 제거
-    sents = [s for s in sents if len(s) >= 6]
+    sents = [s for s in sents if len(s) >= 6]  # 너무 짧은 문장 제거
     return sents
 
 def simple_tokens(s: str) -> List[str]:
@@ -88,10 +80,9 @@ def simple_tokens(s: str) -> List[str]:
     return rxx.findall(r"[가-힣a-z0-9]{2,}", s)
 
 def has_action_verb(s: str) -> bool:
-    return any(v in s for v in ACTION_VERBS) or bool(rxx.search(r"(해야\s*합니다|하십시오|합시다|하세요)", s))
+    return any(v in s for v in ACTION_VERBS) or bool(rxx.search(r"(해야\s*합니다|십시오|합시다|하세요)", s))
 
 def is_header_like(s: str) -> bool:
-    # 동사가 없고 짧거나(<=10자) 슬로건/헤더 패턴이면 헤더로 간주
     if len(s) <= 10 and not has_action_verb(s):
         return True
     if not has_action_verb(s) and any(h in s for h in HEADER_HINTS):
@@ -243,7 +234,6 @@ KW_GUIDE_QA   = ["질문","왜","어떻게","무엇","주의","확인할", "토�
 KW_ACC_CORE = ["사고","재해","위험","원인","예방","대책","노후","추락","협착","감전","화재","질식","중독"]
 KW_ACC_STEP = ["발생","경위","조치","개선","교육","설치","배치","점검","관리"]
 
-# 가이드형 강한 신호 (자동 분류 보정)
 GUIDE_STRONG_HINTS = [
     "물·그늘·휴식", "물, 그늘, 휴식", "물 그늘 휴식",
     "물·바람·휴식", "물, 바람, 휴식", "물 바람 휴식",
