@@ -1,5 +1,4 @@
 streamlit==1.38.0
-rich==13.9.4
 numpy==2.3.4
 pdfminer.six==20231228
 pypdfium2==4.30.0
