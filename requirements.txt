@@ -1,5 +1,5 @@
+networkx==3.3
 streamlit==1.38.0
-pillow==10.4.0
 pdfminer.six==20231228
 python-docx==1.1.2
 regex==2024.9.11
