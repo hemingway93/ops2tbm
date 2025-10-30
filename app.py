@@ -9,7 +9,7 @@ from typing import List, Dict
 import streamlit as st
 from docx import Document
 from docx.shared import Pt
-from pdfminer.high_level import extract_text as pdf_extract_text  # ← 안정 경로
+from pdfminer.high_level import extract_text as pdf_extract_text  # 안정 경로
 import pypdfium2 as pdfium
 import numpy as np
 import regex as rxx
@@ -54,7 +54,6 @@ STOP_TERMS = set([
 ])
 
 def normalize_text(t: str) -> str:
-    """텍스트에서 불필요한 공백과 줄 바꿈을 정리"""
     t = t.replace("\x0c","\n")
     t = re.sub(r"[ \t]+\n","\n",t)
     t = re.sub(r"\n{3,}","\n\n",t)
@@ -73,7 +72,7 @@ def strip_noise_line(line: str) -> str:
     return s
 
 def merge_broken_lines(lines: List[str]) -> List[str]:
-    """줄바꿈이 잘못된 문장들을 병합"""
+    """줄 끝 문장부호/머리표시에 따라 자연 병합"""
     out=[]; buf=""
     for raw in lines:
         s = strip_noise_line(raw)
@@ -88,7 +87,7 @@ def merge_broken_lines(lines: List[str]) -> List[str]:
     return out
 
 def combine_date_with_next(lines: List[str]) -> List[str]:
-    """날짜와 다음 문장을 합쳐서 사건을 묶어주는 함수"""
+    """YYYY.MM.DD 다음 줄의 '사고/사망/중독/무너짐/부딪힘...'과 결합해 사건문 형태로"""
     out=[]; i=0
     while i<len(lines):
         cur=strip_noise_line(lines[i])
@@ -112,11 +111,11 @@ def read_pdf_text(b: bytes) -> str:
     except Exception:
         t = ""
     t = normalize_text(t)
-    if len(t.strip())<10:
+    if len(t.strip()) < 10:  # 텍스트가 너무 짧으면, 이미지/스캔 PDF로 판단
         try:
             with io.BytesIO(b) as bio:
                 pdf = pdfium.PdfDocument(bio)
-                if len(pdf)>0 and not t.strip():
+                if len(pdf) > 0 and not t.strip():
                     st.warning("⚠️ 이미지/스캔 PDF로 보입니다. 현재 OCR 미지원.")
         except Exception:
             pass
