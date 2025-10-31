@@ -17,9 +17,6 @@ import pypdfium2 as pdfium
 import numpy as np
 import regex as rxx
 
-# ----------------------------
-# Streamlit 기본 설정
-# ----------------------------
 st.set_page_config(page_title="OPS2TBM", page_icon="🦺", layout="wide")
 
 # ----------------------------
@@ -45,10 +42,28 @@ NOISE_PATTERNS = [
     r"^https?://\S+$",
     r"^\(?\s*PowerPoint\s*프레젠테이션\s*\)?$",
     r"^안전보건자료실.*$",
+    r"^배포처\s+.*$",
+    r"^홈페이지\s+.*$",
+    r"^주소\s+.*$",
+    r"^VR\s+.*$",
+    r"^리플릿\s+.*$",
+    r"^동영상\s+.*$",
+    r"^APP\s+.*$",
+    r".*검색해\s*보세요.*$",
 ]
-BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2]+"
-DATE_PAT = r"(\d{4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
-META_PATTERNS = [r"<\s*\d+\s*명\s*사망\s*>", r"<\s*\d+\s*명\s*사상\s*>", r"<\s*\d+\s*명\s*의식불명\s*>"]
+
+BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\uF0FC\uF0A7]+"
+
+DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
+#   ‘25. 02. 24.  /  2025.2.24.  등 대응
+
+META_PATTERNS = [
+    r"<\s*\d+\s*명\s*사망\s*>",
+    r"<\s*\d+\s*명\s*사상\s*>",
+    r"<\s*\d+\s*명\s*의식불명\s*>",
+    r"<\s*사망\s*\d+\s*명\s*>",
+    r"<\s*사상\s*\d+\s*명\s*>",
+]
 
 STOP_TERMS = set("""
 및 등 관련 사항 내용 예방 안전 작업 현장 교육 방법 기준 조치
@@ -56,17 +71,24 @@ STOP_TERMS = set("""
 주요 사례 안전작업방법 포스터 동영상 리플릿 가이드 자료실 검색
 키메세지 교육혁신실 안전보건공단 공단 자료 구독 안내 연락 참고 출처
 소재 소재지 위치 장소 지역 시군구 서울 인천 부산 대구 대전 광주 울산 세종 경기도 충청 전라 경상 강원 제주
+명 건 호 호차 호수 페이지 쪽 부록 참고 그림 표 목차
 """.split())
 
-# label에서 제거할 패턴(숫자/코드성/호칭)
 LABEL_DROP_PAT = [
-    r"^\d+$",
-    r"^\d{2,4}[-_]\d{1,}$",
-    r"^\d{4}$",
-    r"^(제)?\d+호$",
-    r"^(호|호수|호차)$",
+    r"^\d+$", r"^\d{2,4}[-_]\d{1,}$", r"^\d{4}$",
+    r"^(제)?\d+호$", r"^(호|호수|호차)$",
     r"^(사업장|업체|소재|소재지|장소|지역)$",
+    r"^\d+\s*(명|건)$",
 ]
+
+RISK_KEYWORDS = {
+    "떨어짐":"추락","추락":"추락","낙하":"낙하","깔림":"깔림","끼임":"끼임",
+    "맞음":"충돌","부딪힘":"충돌","무너짐":"붕괴","붕괴":"붕괴",
+    "질식":"질식","중독":"중독","폭발":"폭발","화재":"화재","감전":"감전",
+    "폭염":"폭염","한열":"폭염","열사병":"폭염","미세먼지":"미세먼지",
+    "컨베이어":"협착","선반":"절삭","크레인":"양중","천공기":"천공",
+    "지붕":"지붕작업","비계":"비계","갱폼":"비계","발판":"비계"
+}
 
 def normalize_text(t: str) -> str:
     t = t.replace("\x0c", "\n")
@@ -105,8 +127,11 @@ def combine_date_with_next(lines: List[str]) -> List[str]:
         cur = strip_noise_line(lines[i])
         if re.search(DATE_PAT, cur) and (i + 1) < len(lines):
             nxt = strip_noise_line(lines[i + 1])
-            if re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|무너짐)", nxt):
+            if re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|무너짐|낙하)", nxt):
                 m = re.search(DATE_PAT, cur); y, mo, d = m.groups()
+                # '25 → 2025 보정
+                y = int(y.replace("’","").replace("'",""))
+                y = 2000 + y if y < 100 else y
                 out.append(f"{int(y)}년 {int(mo)}월 {int(d)}일, {nxt}")
                 i += 2; continue
         out.append(cur); i += 1
@@ -123,9 +148,11 @@ def preprocess_text_to_sentences(text: str) -> List[str]:
     for s in raw:
         s2 = strip_noise_line(s)
         if not s2: continue
-        if re.search(r"(주요사고|안전작업방법|콘텐츠링크)$", s2): continue
+        if re.search(r"(주요사고|안전작업방법|콘텐츠링크|주요 사고개요)$", s2):  # 잡제목 제거
+            continue
         if len(s2) < 6: continue
         sents.append(s2)
+    # 중복 제거
     seen, dedup = set(), []
     for s in sents:
         k = re.sub(r"\s+", "", s)
@@ -240,7 +267,7 @@ def ai_extract_summary(text: str, limit: int = 8) -> List[str]:
 ACTION_VERBS = [
     "설치","배치","착용","점검","확인","측정","기록","표시","제공","비치",
     "보고","신고","교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려",
-    "가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수"
+    "가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정"
 ]
 ACTION_PAT = (
     r"(?P<obj>[가-힣a-zA-Z0-9·\(\)\[\]\/\-\s]{2,}?)\s*"
@@ -249,19 +276,22 @@ ACTION_PAT = (
     r"(?P<verb2>" + "|".join(ACTION_VERBS) + r"|실시|운영|관리)\b"
 )
 
-def tokens(s: str) -> List[str]:
-    return rxx.findall(r"[가-힣a-z0-9]{2,}", s.lower())
-
 def drop_label_token(t: str) -> bool:
     if t in STOP_TERMS: return True
     for pat in LABEL_DROP_PAT:
         if re.match(pat, t): return True
-    # 너무 일반적인 토큰 제거
-    if t in {"소재","소재지","지역","장소","버스","영업소","업체","자료","키","메세지"}: return True
+    if t in {"소재","소재지","지역","장소","버스","영업소","업체","자료","키","메세지","명"}:
+        return True
     return False
 
 def top_terms_for_label(text: str, k: int = 3) -> List[str]:
     doc_cnt = Counter([t for t in tokens(text) if not drop_label_token(t)])
+    # 위험유형을 우선 반영
+    bonus = Counter()
+    for t in list(doc_cnt.keys()):
+        if t in RISK_KEYWORDS:
+            bonus[RISK_KEYWORDS[t]] += doc_cnt[t]
+    doc_cnt += bonus
     kb = st.session_state.kb_terms
     if kb:
         for t, c in kb.items():
@@ -275,33 +305,16 @@ def top_terms_for_label(text: str, k: int = 3) -> List[str]:
     return [t for t, _ in cand[:k]]
 
 def dynamic_topic_label(text: str) -> str:
-    return " · ".join(top_terms_for_label(text, k=3))
-
-def is_accident_sentence(s: str) -> bool:
-    if any(w in s for w in ["예방", "대책", "지침", "가이드"]):
-        return False
-    return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|무너짐)", s))
-
-def is_prevention_sentence(s: str) -> bool:
-    return any(w in s for w in ["예방", "대책", "지침", "수칙"])
-
-def is_risk_sentence(s: str) -> bool:
-    return any(w in s for w in ["위험", "요인", "원인", "증상", "결빙", "강풍", "폭염", "미세먼지", "회전체", "비산", "말림"])
-
-def naturalize_case_sentence(s: str) -> str:
-    s = soften(s)
-    m = re.search(DATE_PAT, s)
-    date_txt = ""
-    if m:
-        y, mo, d = m.groups()
-        date_txt = f"{int(y)}년 {int(mo)}월 {int(d)}일, "
-        s = s.replace(m.group(0), "").strip()
-    s = s.strip(" ,.-")
-    # 이미 '사망/사상/사고'가 들어있으면 뒤에 자동 문구를 과하게 붙이지 않음
-    if not re.search(r"(사망|사상|사고|중독|붕괴|질식|추락|깔림|부딪힘|무너짐)", s):
-        if not re.search(r"(다\.|입니다\.|했습니다\.)$", s):
-            s = s.rstrip(" .") + " 사고가 발생했습니다."
-    return (date_txt + s).strip()
+    terms = top_terms_for_label(text, k=3)
+    # '비계'와 '추락' 같이 나오면 '비계 추락 재해예방' 식으로 보강
+    risks = [RISK_KEYWORDS.get(t, t) for t in terms if t in RISK_KEYWORDS or t in RISK_KEYWORDS.values()]
+    extra = [t for t in terms if t not in risks]
+    label_core = " ".join(sorted(set(risks), key=risks.index)) or "안전보건"
+    tail = " ".join(extra[:1])  # 너무 길어지지 않게 1개만
+    label = (label_core + (" " + tail if tail else "")).strip()
+    if "예방" not in label:
+        label += " 재해예방"
+    return label
 
 def soften(s: str) -> str:
     s = s.replace("하여야", "해야 합니다").replace("한다", "합니다").replace("한다.", "합니다.")
@@ -313,32 +326,83 @@ def soften(s: str) -> str:
     s = re.sub(BULLET_PREFIX, "", s).strip(" -•●\t")
     return s
 
+def is_accident_sentence(s: str) -> bool:
+    if any(w in s for w in ["예방", "대책", "지침", "수칙"]):
+        return False
+    return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|무너짐|낙하)", s))
+
+def is_prevention_sentence(s: str) -> bool:
+    return any(w in s for w in ["예방", "대책", "지침", "수칙", "안전조치"])
+
+def is_risk_sentence(s: str) -> bool:
+    return any(w in s for w in ["위험", "요인", "원인", "증상", "결빙", "강풍", "폭염", "미세먼지", "회전체", "비산", "말림", "추락", "낙하", "협착"])
+
+def naturalize_case_sentence(s: str) -> str:
+    s = soften(s)
+    # <사망 1명> 등 수치 표현을 자연 문장으로
+    death = re.search(r"사망\s*(\d+)\s*명", s)
+    inj = re.search(r"사상\s*(\d+)\s*명", s)
+    unconscious = re.search(r"의식불명", s)
+    info = []
+    if death: info.append(f"근로자 {death.group(1)}명 사망")
+    if inj and not death: info.append(f"{inj.group(1)}명 사상")
+    if unconscious: info.append("의식불명 발생")
+    # 날짜 추출/보정
+    m = re.search(DATE_PAT, s)
+    date_txt = ""
+    if m:
+        y, mo, d = m.groups()
+        y = int(str(y).replace("’","").replace("'",""))
+        y = 2000 + y if y < 100 else y
+        date_txt = f"{int(y)}년 {int(mo)}월 {int(d)}일, "
+        s = s.replace(m.group(0), "").strip()
+    # 장소/작업 내용 단서들 정리
+    s = s.strip(" ,.-")
+    # 이미 사고/사망 단어가 있으면 과도한 자동붙임 금지
+    if not re.search(r"(사망|사상|사고|중독|붕괴|질식|추락|깔림|부딪힘|무너짐|낙하)", s):
+        if not re.search(r"(다\.|입니다\.|했습니다\.)$", s):
+            s = s.rstrip(" .") + " 사고가 발생했습니다."
+    tail = ""
+    if info:
+        tail = " " + (", ".join(info)) + "했습니다." if not s.endswith("습니다.") else ""
+    return (date_txt + s + tail).strip()
+
 def to_action_sentence(s: str) -> str:
     s2 = soften(s)
-    # 예방/대책 키워드가 있으면 목적형 템플릿으로
-    if is_prevention_sentence(s2):
-        base = re.sub(r"(위험\s*)?예방(대책|을 위해)?", "", s2).strip(" ,")
-        if not base:
-            base = "해당 위험을 예방하기 위해 안전조치를 실시합니다."
-        return f"{base}를(을) 예방하기 위해 필요한 안전조치를 시행합니다." if len(base) < 25 else f"{base} 예방을 위해 필요한 안전조치를 시행합니다."
+    # '에 따른' 구조 교정
+    s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
+    s2 = re.sub(r"\s*에\s*따라\s*", " 시 ", s2)
+    # 계획서/지휘자/발판/난간/방호망 등 템플릿 강화
+    if re.search(r"(작업계획서|계획서)\s*(작성|수립)?", s2):
+        return "작업 전 작업계획서를 작성하고 작업지휘자를 지정합니다."
+    if re.search(r"(발판|작업발판)", s2) and re.search(r"(설치|확인|점검)", s2):
+        return "작업발판을 견고하게 설치하고 상태를 점검합니다."
+    if re.search(r"(난간|안전난간)", s2):
+        return "추락 위험 구간에 안전난간을 설치합니다."
+    if re.search(r"(방호망|추락방호망|안전망)", s2):
+        return "작업 하부에 추락방호망을 설치합니다."
+    if re.search(r"(안전대|라이프라인|벨트)", s2):
+        return "안전대를 안전한 지지점에 연결하고 라이프라인을 사용합니다."
+    if re.search(r"(개인보호구|PPE|안전모|보호안경|보호장갑|안전화)", s2):
+        return "안전모·보호안경·안전화 등 개인보호구를 올바르게 착용합니다."
+    if re.search(r"(출입통제|위험구역|감시자|유도원)", s2):
+        return "위험구역을 설정하고 출입을 통제하며 감시자를 배치합니다."
+
     m = re.search(ACTION_PAT, s2)
     if not m:
         return s2 if s2.endswith(("니다.", "합니다.", "다.")) else (s2.rstrip(" .") + " 합니다.")
     obj = (m.group("obj") or m.group("obj2") or "").strip()
     verb = (m.group("verb") or m.group("verb2") or "실시").strip()
-    # 자주 쓰는 강세 템플릿
-    if "설치" in verb: prefix = "반드시 "
-    elif verb in ("확인","점검","측정","기록"): prefix = "작업 전 "
-    else: prefix = ""
+    prefix = "반드시 " if "설치" in verb else ("작업 전 " if verb in ("확인","점검","측정","기록","작성","지정") else "")
     if obj and not re.search(r"(을|를|에|에서|과|와|의)$", obj):
         obj += "를"
     core = f"{prefix}{obj} {verb}".strip()
+    core = re.sub(r"\s+", " ", core)
     return (core + "합니다.").replace("  ", " ")
 
 def classify_sentence(s: str) -> str:
     if is_accident_sentence(s): return "case"
-    if re.search(ACTION_PAT, s): return "action"
-    if is_prevention_sentence(s): return "prevention"
+    if re.search(ACTION_PAT, s) or is_prevention_sentence(s): return "action"
     if is_risk_sentence(s): return "risk"
     if "?" in s or "확인" in s or "점검" in s: return "question"
     return "other"
@@ -356,12 +420,12 @@ def kb_ingest_text(text: str) -> None:
     for s in sents:
         if re.search(ACTION_PAT, s) or is_prevention_sentence(s):
             cand = to_action_sentence(s)
-            if 2 <= len(cand) <= 140:
+            if 2 <= len(cand) <= 160:
                 st.session_state.kb_actions.append(cand)
     for s in sents:
         if "?" in s or "확인" in s or "점검" in s:
             q = soften(s if s.endswith("?") else s + " 맞습니까?")
-            if 2 <= len(q) <= 120:
+            if 2 <= len(q) <= 140:
                 st.session_state.kb_questions.append(q)
 
 def kb_prune() -> None:
@@ -372,9 +436,9 @@ def kb_prune() -> None:
             if k not in seen:
                 seen.add(k); out.append(x)
         return out
-    st.session_state.kb_actions = dedup_keep_order(st.session_state.kb_actions)[:600]
-    st.session_state.kb_questions = dedup_keep_order(st.session_state.kb_questions)[:350]
-    st.session_state.kb_terms = Counter(dict(st.session_state.kb_terms.most_common(1200)))
+    st.session_state.kb_actions = dedup_keep_order(st.session_state.kb_actions)[:700]
+    st.session_state.kb_questions = dedup_keep_order(st.session_state.kb_questions)[:400]
+    st.session_state.kb_terms = Counter(dict(st.session_state.kb_terms.most_common(1500)))
 
 def kb_match_candidates(cands: List[str], base_text: str, limit: int) -> List[str]:
     bt = set(tokens(base_text))
@@ -397,13 +461,10 @@ def make_structured_script(text: str, max_points: int = 6) -> str:
         return "본문이 충분하지 않아 대본을 생성할 수 없습니다."
 
     case, risk, act, ask = [], [], [], []
-    # 핵심문장들을 분류해서 담기
     for s in core:
         c = classify_sentence(s)
         if c == "case":
             case.append(naturalize_case_sentence(s))
-        elif c == "prevention":
-            act.append(to_action_sentence(s))
         elif c == "action":
             act.append(to_action_sentence(s))
         elif c == "risk":
@@ -424,7 +485,7 @@ def make_structured_script(text: str, max_points: int = 6) -> str:
     lines = []
     lines.append(f"🦺 TBM 교육대본 – {topic_label}\n")
     lines.append("◎ 도입")
-    lines.append(f"오늘은 최근 자료를 바탕으로 '{topic_label}' 관련 위험과 예방 포인트를 간단히 정리하겠습니다.\n")
+    lines.append(f"오늘은 최근 발생한 '{topic_label.replace(' 재해예방','')}' 사례를 통해, 우리 현장에서 같은 사고를 예방하기 위한 안전조치를 함께 살펴보겠습니다.\n")
 
     if case:
         lines.append("◎ 사고 사례")
@@ -466,7 +527,6 @@ def to_docx_bytes(script: str) -> bytes:
     try:
         style = doc.styles["Normal"]; style.font.name = "Malgun Gothic"; style.font.size = Pt(11)
     except Exception: pass
-    # 본문
     for raw in script.split("\n"):
         line = _xml_safe(raw)
         p = doc.add_paragraph(line)
@@ -477,7 +537,7 @@ def to_docx_bytes(script: str) -> bytes:
     bio = io.BytesIO(); doc.save(bio); bio.seek(0); return bio.read()
 
 # ==========================================================
-# UI (기존 유지) — 좌: 입력/미리보기, 우: 옵션/생성/다운로드
+# UI (기존 유지)
 # ==========================================================
 with st.sidebar:
     st.header("ℹ️ 소개 / 사용법")
@@ -581,12 +641,13 @@ with col2:
             st.warning("텍스트가 비어 있습니다. PDF/ZIP 업로드 또는 텍스트 입력 후 시도하세요.")
         else:
             with st.spinner("대본 생성 중..."):
-                if gen_mode == "자연스러운 교육대본(무료)":
+                if gen_mode == "자연스러운 교육대본(무료)"):
                     script = make_structured_script(text_for_gen, max_points=max_points)
                     subtitle = "자연스러운 교육대본(무료)"
                 else:
                     sents = ai_extract_summary(text_for_gen, max_points if use_ai else 6)
-                    sents = [soften(s) for s in sents]
+                    # TBM 기본 모드도 노이즈 정리/톤 완화
+                    sents = [soften(s) for s in sents if not re.match(r"(배포처|주소|홈페이지)", s)]
                     script = "\n".join([f"- {s}" for s in sents]) if sents else "텍스트에서 핵심 문장을 찾지 못했습니다."
                     subtitle = "TBM 기본(현행)"
 
