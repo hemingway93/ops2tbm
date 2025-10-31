@@ -641,7 +641,7 @@ with col2:
             st.warning("텍스트가 비어 있습니다. PDF/ZIP 업로드 또는 텍스트 입력 후 시도하세요.")
         else:
             with st.spinner("대본 생성 중..."):
-                if gen_mode == "자연스러운 교육대본(무료)"):
+                if gen_mode == "자연스러운 교육대본(무료)":
                     script = make_structured_script(text_for_gen, max_points=max_points)
                     subtitle = "자연스러운 교육대본(무료)"
                 else:
