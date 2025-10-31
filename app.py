@@ -1,9 +1,14 @@
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 생성 (완전 무료)
-#  * 기존 UI 유지 (좌: 업로드/미리보기, 우: 옵션/생성/다운로드)
-#  * 전처리 → TextRank+MMR 요약(세션 KB 가중) → 사람말 같은 리라이팅
-#  * PDF/ZIP/붙여넣기 입력은 세션 KB(용어/행동/질문)에 누적
-#  * 이미지/스캔 PDF는 OCR 미지원(경고)
+#  * 입력: PDF / ZIP(PDF 묶음) / 텍스트 붙여넣기
+#  * 파이프라인: 전처리 → TextRank+MMR 요약(세션 KB 가중) → 규칙기반 리라이팅
+#  * 모드:
+#      - 핵심요약: 보고서형 단락 요약(불릿 최소, 잡음 제거, 연결어 삽입)
+#      - 자연스러운 교육대본(무료): TBM 대본(도입/사례/위험/수칙/질문/마무리)
+#  * 시드 KB: 학습파일.zip(개별 24 PDF)에서 추출한 위험유형/행동/질문 내장
+#  * 도메인 템플릿: 기본 OFF(토글로 선택). 트리거/유사도/우선순위 3중 안전장치.
+#  * OCR 미지원(이미지/스캔 PDF는 경고)
+#  * UI: 기존 구조 유지 (좌 입력/미리보기, 우 옵션/생성/다운로드)
 # ==========================================================
 
 import io, zipfile, re
@@ -12,16 +17,69 @@ from typing import List, Dict, Tuple
 import streamlit as st
 from docx import Document
 from docx.shared import Pt
-from pdfminer.high_level import extract_text as pdf_extract_text
+from pdfminer_high_level import extract_text as pdf_extract_text  # streamlit cloud 호환
 import pypdfium2 as pdfium
 import numpy as np
 import regex as rxx
 
+# ---------- 페이지 설정 ----------
 st.set_page_config(page_title="OPS2TBM", page_icon="🦺", layout="wide")
 
-# ----------------------------
-# 세션 상태 초기화
-# ----------------------------
+# ==========================================================
+# 시드 KB (학습파일.zip 24개 PDF에서 자동 수집한 내용)
+#  - 과다한 하드코딩 대신, 최소·대표 패턴만 내장하여 초기 품질을 안정화
+# ==========================================================
+SEED_RISK_MAP = {
+  "중독": "중독", "떨어짐": "떨어짐", "끼임": "끼임", "질식": "질식", "화재": "화재",
+  "깔림": "깔림", "맞음": "맞음", "감전": "감전", "지붕": "지붕작업", "예초": "예초",
+  "폭발": "폭발", "천공기": "천공", "선반": "절삭", "컨베이어": "협착", "부딪힘": "충돌",
+  "미세먼지": "미세먼지", "크레인": "양중", "무너짐": "붕괴", "비계": "비계",
+  "추락": "추락", "폭염": "폭염", "벌목": "벌목", "낙하": "낙하", "붕괴": "붕괴", "갱폼": "비계", "발판": "비계"
+}
+
+SEED_ACTIONS = [
+  "밀폐공간작업 교육 및 훈련 실시",
+  "출입 전 충분한 환기 실시",
+  "작업 전 가스농도 측정",
+  "작업자에 호흡용 보호구 지급",
+  "작업 상황 감시자 배치",
+  "작업 시 호흡용 보호구 착용",
+  "출입·퇴장 인원 점검",
+  "보호장구 없이 구조 금지",
+  "MSDS 확인 및 유해성 교육 실시",
+  "국소배기장치 설치·가동",
+  "환기가 불충분한 공간에서는 급기/배기팬 사용",
+  "유기화합물 취급 시 방독마스크(갈색 정화통) 착용",
+  "송기마스크·공기호흡기 적정 사용",
+  "예초기 날 정지 후 이물질 제거·점검",
+  "예초·벌목 작업 시 작업자 간 안전거리 유지",
+  "벌목 시 쓰러지는 방향 사전 결정 및 대피로 확보",
+  "작업발판 견고히 설치 및 상태 점검",
+  "개구부·개구창 등 추락 위험 구간에 안전난간 설치",
+  "안전대를 안전한 지지점에 연결하고 라이프라인 사용",
+  "위험구역 설정·출입통제·감시자 배치",
+  "양중 계획 수립 및 신호수 지정·통신 유지",
+  "회전체·물림점 방호장치 설치 및 점검",
+  "작업 전 작업계획서 작성 및 작업지휘자 지정",
+  "개인보호구(안전모·보호안경·안전화 등) 올바르게 착용",
+  "화기작업 허가 및 안전점검 철저",
+  "정비·청소·점검 작업 시 기계 전원 차단",
+]
+
+SEED_QUESTIONS = [
+  "작업 전 작업계획서와 위험성평가를 검토했습니까?",
+  "개구부·개구창 등 추락 위험 구간에 안전난간을 설치했습니까?",
+  "작업발판이 견고하게 설치되고 상태가 양호합니까?",
+  "안전대 연결점과 라이프라인이 확보되었습니까?",
+  "국소배기장치를 가동하고 환기 경로가 확보되었습니까?",
+  "호흡보호구가 작업에 적합하며 관리가 되고 있습니까?",
+  "밀폐공간 출입·퇴장 인원 점검이 이루어지고 있습니까?",
+  "예초·벌목 작업 시 안전거리와 대피로를 확보했습니까?",
+  "양중 작업에 신호수 지정 및 통신체계가 마련되었습니까?",
+  "회전체·물림점 방호장치가 정상 동작합니까?"
+]
+
+# ---------- 세션 상태 ----------
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 if "kb_terms" not in st.session_state:
@@ -30,9 +88,13 @@ if "kb_actions" not in st.session_state:
     st.session_state.kb_actions: List[str] = []
 if "kb_questions" not in st.session_state:
     st.session_state.kb_questions: List[str] = []
+if "domain_toggle" not in st.session_state:
+    st.session_state.domain_toggle = False  # 도메인 템플릿 기본 Off
+if "seed_loaded" not in st.session_state:
+    st.session_state.seed_loaded = False
 
 # ==========================================================
-# 전처리 설정/유틸
+# 전처리 유틸 / 패턴
 # ==========================================================
 NOISE_PATTERNS = [
     r"^제?\s?\d{4}\s?[-.]?\s?\d+\s?호$",
@@ -51,12 +113,8 @@ NOISE_PATTERNS = [
     r"^APP\s+.*$",
     r".*검색해\s*보세요.*$",
 ]
-
 BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\uF0FC\uF0A7]+"
-
 DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
-#   ‘25. 02. 24.  /  2025.2.24.  등 대응
-
 META_PATTERNS = [
     r"<\s*\d+\s*명\s*사망\s*>",
     r"<\s*\d+\s*명\s*사상\s*>",
@@ -64,7 +122,6 @@ META_PATTERNS = [
     r"<\s*사망\s*\d+\s*명\s*>",
     r"<\s*사상\s*\d+\s*명\s*>",
 ]
-
 STOP_TERMS = set("""
 및 등 관련 사항 내용 예방 안전 작업 현장 교육 방법 기준 조치
 실시 확인 필요 경우 대상 사용 관리 점검 적용 정도 주의 중 전 후
@@ -72,8 +129,8 @@ STOP_TERMS = set("""
 키메세지 교육혁신실 안전보건공단 공단 자료 구독 안내 연락 참고 출처
 소재 소재지 위치 장소 지역 시군구 서울 인천 부산 대구 대전 광주 울산 세종 경기도 충청 전라 경상 강원 제주
 명 건 호 호차 호수 페이지 쪽 부록 참고 그림 표 목차
+안전보건 ops 키 메세지 키메세지 자료 ops교안 교안
 """.split())
-
 LABEL_DROP_PAT = [
     r"^\d+$", r"^\d{2,4}[-_]\d{1,}$", r"^\d{4}$",
     r"^(제)?\d+호$", r"^(호|호수|호차)$",
@@ -81,15 +138,10 @@ LABEL_DROP_PAT = [
     r"^\d+\s*(명|건)$",
 ]
 
-RISK_KEYWORDS = {
-    "떨어짐":"추락","추락":"추락","낙하":"낙하","깔림":"깔림","끼임":"끼임",
-    "맞음":"충돌","부딪힘":"충돌","무너짐":"붕괴","붕괴":"붕괴",
-    "질식":"질식","중독":"중독","폭발":"폭발","화재":"화재","감전":"감전",
-    "폭염":"폭염","한열":"폭염","열사병":"폭염","미세먼지":"미세먼지",
-    "컨베이어":"협착","선반":"절삭","크레인":"양중","천공기":"천공",
-    "지붕":"지붕작업","비계":"비계","갱폼":"비계","발판":"비계"
-}
+# 위험유형(초기값) — 시드 맵으로 초기화 + 동적 보강
+RISK_KEYWORDS = dict(SEED_RISK_MAP)
 
+# ---------- 공통 유틸 ----------
 def normalize_text(t: str) -> str:
     t = t.replace("\x0c", "\n")
     t = re.sub(r"[ \t]+\n", "\n", t)
@@ -129,8 +181,7 @@ def combine_date_with_next(lines: List[str]) -> List[str]:
             nxt = strip_noise_line(lines[i + 1])
             if re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|무너짐|낙하)", nxt):
                 m = re.search(DATE_PAT, cur); y, mo, d = m.groups()
-                # '25 → 2025 보정
-                y = int(y.replace("’","").replace("'",""))
+                y = int(str(y).replace("’","").replace("'",""))
                 y = 2000 + y if y < 100 else y
                 out.append(f"{int(y)}년 {int(mo)}월 {int(d)}일, {nxt}")
                 i += 2; continue
@@ -148,7 +199,7 @@ def preprocess_text_to_sentences(text: str) -> List[str]:
     for s in raw:
         s2 = strip_noise_line(s)
         if not s2: continue
-        if re.search(r"(주요사고|안전작업방법|콘텐츠링크|주요 사고개요)$", s2):  # 잡제목 제거
+        if re.search(r"(주요사고|안전작업방법|콘텐츠링크|주요 사고개요)$", s2):
             continue
         if len(s2) < 6: continue
         sents.append(s2)
@@ -161,7 +212,7 @@ def preprocess_text_to_sentences(text: str) -> List[str]:
     return dedup
 
 # ==========================================================
-# PDF 텍스트 추출
+# PDF 처리
 # ==========================================================
 def read_pdf_text(b: bytes) -> str:
     try:
@@ -262,7 +313,23 @@ def ai_extract_summary(text: str, limit: int = 8) -> List[str]:
     return [sents[i] for i in idx]
 
 # ==========================================================
-# 라벨/문장 분류/리라이팅
+# 도메인 템플릿(안전장치 적용)
+# ==========================================================
+DOMAIN_TEMPLATES = [
+    ({"비계","발판","갱폼","추락"}, "작업발판을 견고하게 설치하고 안전난간 및 추락방호망을 확보합니다."),
+    ({"안전난간","난간","개구부"}, "개구부·개구창 등 추락 위험 구간에 안전난간을 설치합니다."),
+    ({"안전대","라이프라인","벨트"}, "안전대를 안전한 지지점에 연결하고 라이프라인을 사용합니다."),
+    ({"MSDS","국소배기","환기"}, "취급 물질의 MSDS를 확인하고 국소배기장치를 가동하여 충분히 환기합니다."),
+    ({"예초","벌목","예초기"}, "예초·벌목 작업 시 작업자 간 안전거리를 유지하고 대피로를 확보합니다."),
+    ({"크레인","양중"}, "양중 계획을 수립하고 신호수를 지정하여 통신을 유지합니다."),
+    ({"컨베이어","협착","회전체"}, "회전체·물림점 접촉을 방지하도록 방호장치를 설치하고 점검합니다."),
+]
+
+def jaccard(a: set, b: set) -> float:
+    return len(a & b) / (len(a | b) + 1e-8)
+
+# ==========================================================
+# 라벨/분류/리라이팅
 # ==========================================================
 ACTION_VERBS = [
     "설치","배치","착용","점검","확인","측정","기록","표시","제공","비치",
@@ -280,13 +347,12 @@ def drop_label_token(t: str) -> bool:
     if t in STOP_TERMS: return True
     for pat in LABEL_DROP_PAT:
         if re.match(pat, t): return True
-    if t in {"소재","소재지","지역","장소","버스","영업소","업체","자료","키","메세지","명"}:
+    if t in {"소재","소재지","지역","장소","버스","영업소","업체","자료","키","메세지","명","안전보건"}:
         return True
     return False
 
 def top_terms_for_label(text: str, k: int = 3) -> List[str]:
     doc_cnt = Counter([t for t in tokens(text) if not drop_label_token(t)])
-    # 위험유형을 우선 반영
     bonus = Counter()
     for t in list(doc_cnt.keys()):
         if t in RISK_KEYWORDS:
@@ -306,11 +372,10 @@ def top_terms_for_label(text: str, k: int = 3) -> List[str]:
 
 def dynamic_topic_label(text: str) -> str:
     terms = top_terms_for_label(text, k=3)
-    # '비계'와 '추락' 같이 나오면 '비계 추락 재해예방' 식으로 보강
     risks = [RISK_KEYWORDS.get(t, t) for t in terms if t in RISK_KEYWORDS or t in RISK_KEYWORDS.values()]
     extra = [t for t in terms if t not in risks]
     label_core = " ".join(sorted(set(risks), key=risks.index)) or "안전보건"
-    tail = " ".join(extra[:1])  # 너무 길어지지 않게 1개만
+    tail = " ".join(extra[:1])
     label = (label_core + (" " + tail if tail else "")).strip()
     if "예방" not in label:
         label += " 재해예방"
@@ -339,7 +404,6 @@ def is_risk_sentence(s: str) -> bool:
 
 def naturalize_case_sentence(s: str) -> str:
     s = soften(s)
-    # <사망 1명> 등 수치 표현을 자연 문장으로
     death = re.search(r"사망\s*(\d+)\s*명", s)
     inj = re.search(r"사상\s*(\d+)\s*명", s)
     unconscious = re.search(r"의식불명", s)
@@ -347,7 +411,6 @@ def naturalize_case_sentence(s: str) -> str:
     if death: info.append(f"근로자 {death.group(1)}명 사망")
     if inj and not death: info.append(f"{inj.group(1)}명 사상")
     if unconscious: info.append("의식불명 발생")
-    # 날짜 추출/보정
     m = re.search(DATE_PAT, s)
     date_txt = ""
     if m:
@@ -356,38 +419,44 @@ def naturalize_case_sentence(s: str) -> str:
         y = 2000 + y if y < 100 else y
         date_txt = f"{int(y)}년 {int(mo)}월 {int(d)}일, "
         s = s.replace(m.group(0), "").strip()
-    # 장소/작업 내용 단서들 정리
     s = s.strip(" ,.-")
-    # 이미 사고/사망 단어가 있으면 과도한 자동붙임 금지
     if not re.search(r"(사망|사상|사고|중독|붕괴|질식|추락|깔림|부딪힘|무너짐|낙하)", s):
         if not re.search(r"(다\.|입니다\.|했습니다\.)$", s):
             s = s.rstrip(" .") + " 사고가 발생했습니다."
     tail = ""
-    if info:
-        tail = " " + (", ".join(info)) + "했습니다." if not s.endswith("습니다.") else ""
+    if info and not s.endswith("습니다."):
+        tail = " " + (", ".join(info)) + "했습니다."
     return (date_txt + s + tail).strip()
 
-def to_action_sentence(s: str) -> str:
+# 도메인 템플릿(신중 적용)
+def _domain_template_apply(s: str, base_text: str) -> str:
+    if not st.session_state.get("domain_toggle"):
+        return s
+    sent_toks = set(tokens(s))
+    base_toks = set(tokens(base_text))
+    # 유사도 기준(과적용 방지)
+    if jaccard(sent_toks, base_toks) < 0.05:
+        return s
+    best = None; best_hits = 0
+    for triggers, render in DOMAIN_TEMPLATES:
+        if (sent_toks & triggers) and (base_toks & triggers):
+            hits = len((sent_toks | base_toks) & triggers)
+            if hits > best_hits:
+                best_hits = hits; best = render
+    return best if best else s
+
+def to_action_sentence(s: str, base_text: str) -> str:
     s2 = soften(s)
-    # '에 따른' 구조 교정
+    # 홍보성/의미 불명 구절 제거
+    s2 = re.sub(r"(위기탈출\s*안전보건)", "", s2).strip()
+    # '에 따른/따라' 교정
     s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
     s2 = re.sub(r"\s*에\s*따라\s*", " 시 ", s2)
-    # 계획서/지휘자/발판/난간/방호망 등 템플릿 강화
-    if re.search(r"(작업계획서|계획서)\s*(작성|수립)?", s2):
-        return "작업 전 작업계획서를 작성하고 작업지휘자를 지정합니다."
-    if re.search(r"(발판|작업발판)", s2) and re.search(r"(설치|확인|점검)", s2):
-        return "작업발판을 견고하게 설치하고 상태를 점검합니다."
-    if re.search(r"(난간|안전난간)", s2):
-        return "추락 위험 구간에 안전난간을 설치합니다."
-    if re.search(r"(방호망|추락방호망|안전망)", s2):
-        return "작업 하부에 추락방호망을 설치합니다."
-    if re.search(r"(안전대|라이프라인|벨트)", s2):
-        return "안전대를 안전한 지지점에 연결하고 라이프라인을 사용합니다."
-    if re.search(r"(개인보호구|PPE|안전모|보호안경|보호장갑|안전화)", s2):
-        return "안전모·보호안경·안전화 등 개인보호구를 올바르게 착용합니다."
-    if re.search(r"(출입통제|위험구역|감시자|유도원)", s2):
-        return "위험구역을 설정하고 출입을 통제하며 감시자를 배치합니다."
-
+    # 도메인 템플릿(안전장치) 적용
+    s2_tpl = _domain_template_apply(s2, base_text)
+    if s2_tpl != s2:
+        return s2_tpl if s2_tpl.endswith(("다.", "습니다.", "합니다.")) else (s2_tpl.rstrip(" .") + " 합니다.")
+    # 일반 패턴
     m = re.search(ACTION_PAT, s2)
     if not m:
         return s2 if s2.endswith(("니다.", "합니다.", "다.")) else (s2.rstrip(" .") + " 합니다.")
@@ -408,8 +477,25 @@ def classify_sentence(s: str) -> str:
     return "other"
 
 # ==========================================================
-# 세션 KB 누적/활용
+# 세션 KB 누적/활용 (+ 시드 KB 로드)
 # ==========================================================
+def seed_kb_once():
+    if not st.session_state.seed_loaded:
+        # 위험유형 시드
+        for t, k in SEED_RISK_MAP.items():
+            if t not in RISK_KEYWORDS:
+                RISK_KEYWORDS[t] = k
+        # 행동/질문 시드
+        for a in SEED_ACTIONS:
+            if 2 <= len(a) <= 160:
+                st.session_state.kb_actions.append(a if a.endswith(("다","다.","합니다","합니다.")) else a + " 합니다.")
+        for q in SEED_QUESTIONS:
+            st.session_state.kb_questions.append(q if q.endswith("?") else q + "?")
+        # 용어 시드(위험유형 가중)
+        for t in SEED_RISK_MAP.keys():
+            st.session_state.kb_terms[t] += 5
+        st.session_state.seed_loaded = True
+
 def kb_ingest_text(text: str) -> None:
     if not (text or "").strip(): return
     sents = preprocess_text_to_sentences(text)
@@ -417,9 +503,12 @@ def kb_ingest_text(text: str) -> None:
         for t in tokens(s):
             if len(t) >= 2:
                 st.session_state.kb_terms[t] += 1
+                if re.search(r"(추락|낙하|깔림|끼임|중독|질식|화재|폭발|감전|폭염|붕괴|비계|갱폼|예초|벌목|컨베이어|크레인|지붕|선반|천공)", t):
+                    if t not in RISK_KEYWORDS:
+                        RISK_KEYWORDS[t] = t
     for s in sents:
         if re.search(ACTION_PAT, s) or is_prevention_sentence(s):
-            cand = to_action_sentence(s)
+            cand = to_action_sentence(s, text)
             if 2 <= len(cand) <= 160:
                 st.session_state.kb_actions.append(cand)
     for s in sents:
@@ -436,9 +525,9 @@ def kb_prune() -> None:
             if k not in seen:
                 seen.add(k); out.append(x)
         return out
-    st.session_state.kb_actions = dedup_keep_order(st.session_state.kb_actions)[:700]
-    st.session_state.kb_questions = dedup_keep_order(st.session_state.kb_questions)[:400]
-    st.session_state.kb_terms = Counter(dict(st.session_state.kb_terms.most_common(1500)))
+    st.session_state.kb_actions = dedup_keep_order(st.session_state.kb_actions)[:900]
+    st.session_state.kb_questions = dedup_keep_order(st.session_state.kb_questions)[:500]
+    st.session_state.kb_terms = Counter(dict(st.session_state.kb_terms.most_common(1800)))
 
 def kb_match_candidates(cands: List[str], base_text: str, limit: int) -> List[str]:
     bt = set(tokens(base_text))
@@ -452,7 +541,7 @@ def kb_match_candidates(cands: List[str], base_text: str, limit: int) -> List[st
     return [c for _, c in scored[:limit]]
 
 # ==========================================================
-# 대본 생성(자연스러운 교육대본)
+# 생성 모드 1: 자연스러운 교육대본(무료)
 # ==========================================================
 def make_structured_script(text: str, max_points: int = 6) -> str:
     topic_label = dynamic_topic_label(text)
@@ -466,13 +555,12 @@ def make_structured_script(text: str, max_points: int = 6) -> str:
         if c == "case":
             case.append(naturalize_case_sentence(s))
         elif c == "action":
-            act.append(to_action_sentence(s))
+            act.append(to_action_sentence(s, text))
         elif c == "risk":
             risk.append(soften(s))
         elif c == "question":
             ask.append(soften(s if s.endswith("?") else s + " 맞습니까?"))
 
-    # 부족분 보강(KB)
     if len(act) < 5 and st.session_state.kb_actions:
         act += kb_match_candidates(st.session_state.kb_actions, text, 5 - len(act))
     act = act[:5]
@@ -485,7 +573,7 @@ def make_structured_script(text: str, max_points: int = 6) -> str:
     lines = []
     lines.append(f"🦺 TBM 교육대본 – {topic_label}\n")
     lines.append("◎ 도입")
-    lines.append(f"오늘은 최근 발생한 '{topic_label.replace(' 재해예방','')}' 사례를 통해, 우리 현장에서 같은 사고를 예방하기 위한 안전조치를 함께 살펴보겠습니다.\n")
+    lines.append(f"오늘은 최근 발생한 '{topic_label.replace(' 재해예방','')}' 사고 사례를 중심으로, 우리 현장에서 같은 사고를 예방하기 위한 안전조치를 함께 살펴보겠습니다.\n")
 
     if case:
         lines.append("◎ 사고 사례")
@@ -508,10 +596,62 @@ def make_structured_script(text: str, max_points: int = 6) -> str:
         lines.append("")
 
     lines.append("◎ 마무리 당부")
-    lines.append("오늘 작업 전, 각 공정별 위험요인을 다시 한 번 점검하고 필요한 보호구와 안전조치를 반드시 준비합시다.")
+    lines.append("예방조치는 '선조치 후작업'이 원칙입니다. 오늘 작업 전, 각 공정별 위험요인을 다시 한 번 점검하고 필요한 보호구와 안전조치를 반드시 준비합시다.")
     lines.append("◎ 구호")
     lines.append("“한 번 더 확인! 한 번 더 점검!”")
 
+    return "\n".join(lines)
+
+# ==========================================================
+# 생성 모드 2: 핵심요약 (보고서형)
+# ==========================================================
+def make_concise_report(text: str, max_points: int = 6) -> str:
+    sents = ai_extract_summary(text, max_points)
+    sents = [soften(s) for s in sents if not re.match(r"(배포처|주소|홈페이지|VR|리플릿)", s)]
+    if not sents:
+        return "텍스트에서 핵심을 요약할 수 없습니다."
+
+    cases = [naturalize_case_sentence(s) for s in sents if is_accident_sentence(s)]
+    risks  = [soften(s) for s in sents if (not is_accident_sentence(s)) and is_risk_sentence(s)]
+    acts   = [to_action_sentence(s, text) for s in sents if (not is_accident_sentence(s)) and (is_prevention_sentence(s) or re.search(ACTION_PAT, s))]
+
+    def uniq_keep(seq: List[str]) -> List[str]:
+        seen, out = set(), []
+        for x in seq:
+            k = re.sub(r"\s+", "", x)
+            if k not in seen:
+                seen.add(k); out.append(x)
+        return out
+
+    cases = uniq_keep(cases)[:3]
+    risks  = uniq_keep(risks)[:3]
+    acts   = uniq_keep(acts)[:4]
+
+    topic = dynamic_topic_label(text)
+
+    lines = [f"📄 핵심요약 — {topic}\n"]
+    if cases:
+        lines.append("【사고 개요】")
+        lines.append("최근 자료에서 다음과 같은 사고가 확인되었습니다.")
+        for c in cases:
+            lines.append(f"- {c}")
+        lines.append("")
+    if risks:
+        lines.append("【주요 위험요인】")
+        lines.append("자료 전반에서 다음 요인이 반복적으로 나타났습니다.")
+        for r in risks:
+            lines.append(f"- {r}")
+        lines.append("")
+    if acts:
+        lines.append("【예방/실천 요약】")
+        lines.append("현장에서 즉시 적용 가능한 핵심 수칙입니다.")
+        for a in acts:
+            lines.append(f"- {a}")
+        lines.append("")
+    if not (cases or risks or acts):
+        lines.append("자료의 핵심을 간단히 정리하면 다음과 같습니다.")
+        for s in sents:
+            lines.append(f"- {s}")
     return "\n".join(lines)
 
 # ==========================================================
@@ -526,18 +666,20 @@ def to_docx_bytes(script: str) -> bytes:
     doc = Document()
     try:
         style = doc.styles["Normal"]; style.font.name = "Malgun Gothic"; style.font.size = Pt(11)
-    except Exception: pass
+    except Exception:
+        pass
     for raw in script.split("\n"):
         line = _xml_safe(raw)
         p = doc.add_paragraph(line)
         for run in p.runs:
             try:
                 run.font.name = "Malgun Gothic"; run.font.size = Pt(11)
-            except Exception: pass
+            except Exception:
+                pass
     bio = io.BytesIO(); doc.save(bio); bio.seek(0); return bio.read()
 
 # ==========================================================
-# UI (기존 유지)
+# UI (기존 틀 유지 / 모드명만 변경 + 시드 로딩)
 # ==========================================================
 with st.sidebar:
     st.header("ℹ️ 소개 / 사용법")
@@ -545,7 +687,14 @@ with st.sidebar:
 **AI 파이프라인(완전 무료)**  
 - 전처리 → TextRank+MMR 요약(세션 KB 가중) → 데이터 기반 리라이팅  
 - PDF/ZIP/텍스트 업로드 시 즉시 누적 학습(용어/행동/질문).
+- 이미지/스캔 PDF는 텍스트 추출이 어려울 수 있습니다.
 """)
+    # 🔧 도메인 템플릿 옵션 (기본 Off)
+    st.session_state.domain_toggle = st.toggle("🔧 도메인 템플릿 강화(신중 적용)", value=False,
+                                              help="문장·본문 트리거 일치 + 유사도 기준 충족 시에만 템플릿을 적용합니다. 새로운 파일엔 보수적으로 동작합니다.")
+
+# 시드 KB 최초 1회 로딩
+seed_kb_once()
 
 st.title("🦺 OPS/포스터를 교육 대본으로 자동 변환 (완전 무료)")
 
@@ -557,6 +706,7 @@ def reset_all():
     st.session_state.kb_actions = []
     st.session_state.kb_questions = []
     st.session_state.uploader_key += 1
+    st.session_state.seed_loaded = False
     st.rerun()
 
 col_top1, col_top2 = st.columns([4, 1])
@@ -630,9 +780,7 @@ with col1:
 
 # ---------- 우측 옵션/생성/다운로드 ----------
 with col2:
-    use_ai = st.toggle("🔹 AI 요약(TextRank+MMR) 사용", value=True)
-    tmpl_choice = st.selectbox("🧩 템플릿", ["자동 선택", "사고사례형", "가이드형"])  # 표시만 유지
-    gen_mode = st.selectbox("🧠 생성 모드", ["TBM 기본(현행)", "자연스러운 교육대본(무료)"])
+    gen_mode = st.selectbox("🧠 생성 모드", ["핵심요약", "자연스러운 교육대본(무료)"])
     max_points = st.slider("요약 강도(핵심문장 개수)", 3, 10, 6)
 
     if st.button("🛠️ 대본 생성", type="primary", use_container_width=True):
@@ -640,25 +788,21 @@ with col2:
         if not text_for_gen:
             st.warning("텍스트가 비어 있습니다. PDF/ZIP 업로드 또는 텍스트 입력 후 시도하세요.")
         else:
-            with st.spinner("대본 생성 중..."):
+            with st.spinner("생성 중..."):
                 if gen_mode == "자연스러운 교육대본(무료)":
                     script = make_structured_script(text_for_gen, max_points=max_points)
                     subtitle = "자연스러운 교육대본(무료)"
                 else:
-                    sents = ai_extract_summary(text_for_gen, max_points if use_ai else 6)
-                    # TBM 기본 모드도 노이즈 정리/톤 완화
-                    sents = [soften(s) for s in sents if not re.match(r"(배포처|주소|홈페이지)", s)]
-                    script = "\n".join([f"- {s}" for s in sents]) if sents else "텍스트에서 핵심 문장을 찾지 못했습니다."
-                    subtitle = "TBM 기본(현행)"
-
-            st.success(f"대본 생성 완료! ({subtitle})")
-            st.text_area("대본 미리보기", value=script, height=420)
+                    script = make_concise_report(text_for_gen, max_points=max_points)
+                    subtitle = "핵심요약"
+            st.success(f"생성 완료! ({subtitle})")
+            st.text_area("결과 미리보기", value=script, height=420)
             c3, c4 = st.columns(2)
             with c3:
                 st.download_button("⬇️ TXT 다운로드", data=_xml_safe(script).encode("utf-8"),
-                                   file_name="tbm_script.txt", use_container_width=True)
+                                   file_name="tbm_output.txt", use_container_width=True)
             with c4:
                 st.download_button("⬇️ DOCX 다운로드", data=to_docx_bytes(script),
-                                   file_name="tbm_script.docx", use_container_width=True)
+                                   file_name="tbm_output.docx", use_container_width=True)
 
-st.caption("완전 무료. 업로드/붙여넣기만 해도 누적 학습 → 요약 가중/행동/질문 보강. 동적 주제 라벨. UI 변경 없음.")
+st.caption("완전 무료. 시드 KB(학습파일.zip 24개) + 업로드/붙여넣기 누적 학습 → 요약 가중/행동/질문 보강. 동적 주제 라벨. 도메인 템플릿은 기본 OFF로 안전 적용.")
