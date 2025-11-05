@@ -1,11 +1,44 @@
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (완전 무료)
-# v2025-11-04-c:
+# v2025-11-04-c (annotated)
 #  - [핫픽스] pdfminer import 경로 보강:
 #      1) from pdfminer.high_level import extract_text
 #      2) (호환) from pdfminer_high_level import extract_text
 #      3) 둘 다 실패 시 OCR 경고 후 빈 텍스트 처리
 #  - [유지] 줄 결합/행동문 자연화/KB 매칭/요약 파이프라인 동일
+#
+# ─────────────────────────────────────────────────────────
+# 📌 아키텍처/적용 기술 매핑 (문서용 설명)
+# [입력 계층]
+#   - Streamlit file_uploader/textarea로 PDF/ZIP/텍스트 입력
+#   - PDF 텍스트 추출: pdfminer.six (텍스트형 우선), pypdfium2로 스캔 감지
+#
+# [전처리 계층]
+#   - 줄 병합(merge_broken_lines): 포스터/리플릿처럼 줄바꿈이 잦은 문서를 문장 단위로 정리
+#   - 날짜+사고 결합(combine_date_with_next): "yy.mm.dd" 다음 줄의 사고문을 한 문장으로 묶음
+#   - 사고 블록 봉합(stitch_case_blocks): “쓰러지자/구조하던 중/차례로 …” 같은 연결어에 반응해 인접 문장 결합
+#
+# [요약/표현 학습 계층]
+#   - TF-IDF 가중 벡터(sentence_tfidf_vectors): 자체 구현 (numpy/regex)
+#   - TextRank(textrank_scores): 그래프 기반 랭킹(transition matrix 수렴)
+#   - MMR(mmR_select): 중복 억제 요약(관련성-다양성 균형)
+#   - 세션 KB 가중치: 업로드 누적 용어에 가중(Boost) → 도메인 적합 요약
+#
+# [NLG 계층(규칙 기반)]
+#   - 문장 완화/자연화(soften), 목적격 조사 삽입(add_obj_particle)
+#   - 예방조치 조각 복원(repair_action_fragments) + 동사 패턴(ACTION_PAT)로 “~ 합니다.” 종결 보정
+#   - 도메인 템플릿(선택): 키워드 트리거 일치 시 보수적으로 문장 치환
+#
+# [생성기]
+#   - 자연스러운 교육대본(make_structured_script)
+#   - 핵심요약(make_concise_report)
+#
+# [출력]
+#   - TXT/DOCX 다운로드: python-docx (Malgun Gothic)
+#
+# [오픈소스/프레임워크]
+#   - Streamlit(웹 UI), pdfminer.six(텍스트 추출), pypdfium2(PDF 확인), numpy(수치연산), regex(토크나이즈), python-docx(문서)
+#   - 100% 로컬 추론(유료/외부 API 없음) — 해커톤 가이드 준수
 # ==========================================================
 
 import io
@@ -21,6 +54,8 @@ from docx import Document
 from docx.shared import Pt
 
 # ---- pdfminer 경로 호환 처리 ----
+# - 일부 환경에서 pdfminer.six 모듈 경로 차이가 있어 2단계 시도
+# - 둘 다 실패하면(예: 사내망 제한/환경 차이) 안전 경고만 띄우고 빈 텍스트 처리
 pdf_extract_text = None
 try:
     # 표준 경로 (pdfminer.six)
@@ -28,17 +63,20 @@ try:
     pdf_extract_text = _extract_text
 except Exception:
     try:
-        # 일부 환경에서 남아있는 과거 경로를 한 번 더 시도
+        # 호환 경로: 일부 패키징/구버전에서 남아있는 케이스
         from pdfminer_high_level import extract_text as _extract_text_compat  # type: ignore
         pdf_extract_text = _extract_text_compat
     except Exception:
         pdf_extract_text = None  # 아래에서 안전 처리
 
+# pypdfium2: PDF 페이지 수/형태 확인(스캔 추정), 텍스트 추출은 하지 않음
 import pypdfium2 as pdfium
 
 st.set_page_config(page_title="OPS2TBM", page_icon="🦺", layout="wide")
 
 # -------------------- 시드 KB --------------------
+# - 초기 도메인 키워드/행동/점검질문을 주입해 “세션 KB”를 형성
+# - 이후 업로드한 PDF/텍스트에서 배운 용어/행동/질문이 실시간 누적됨
 SEED_RISK_MAP = {
     "중독":"중독","떨어짐":"떨어짐","끼임":"끼임","질식":"질식","화재":"화재","깔림":"깔림",
     "맞음":"맞음","감전":"감전","지붕":"지붕작업","예초":"예초","폭발":"폭발","천공기":"천공",
@@ -47,6 +85,7 @@ SEED_RISK_MAP = {
     "갱폼":"비계","발판":"비계"
 }
 SEED_ACTIONS = [
+    # 현장 실천 문장 템플릿(기본 말뭉치) — 업로드 데이터로 계속 보강됨
     "밀폐공간작업 교육 및 훈련 실시","출입 전 충분한 환기 실시","작업 전 가스농도 측정 및 기록",
     "작업 상황 감시자 배치","출입·퇴장 인원 점검","보호장구 없이 구조 금지",
     "MSDS 확인 및 유해성 교육 실시","국소배기장치 설치·가동","환기가 불충분한 공간에서는 급기/배기팬 사용",
@@ -59,6 +98,7 @@ SEED_ACTIONS = [
     "화기작업 허가 및 안전점검","정비·청소·점검 시 기계 전원 차단"
 ]
 SEED_QUESTIONS = [
+    # 일일 안전점검/위험성평가 질의형 템플릿
     "작업 전 작업계획서와 위험성평가를 검토했습니까?",
     "개구부·개구창 등 추락 위험 구간에 안전난간을 설치했습니까?",
     "작업발판이 견고하게 설치되고 상태가 양호합니까?",
@@ -75,16 +115,17 @@ SEED_QUESTIONS = [
 def _init_once():
     ss = st.session_state
     ss.setdefault("uploader_key", 0)
-    ss.setdefault("kb_terms", Counter())
-    ss.setdefault("kb_actions", [])
-    ss.setdefault("kb_questions", [])
-    ss.setdefault("domain_toggle", False)
+    ss.setdefault("kb_terms", Counter())      # 업로드로 학습한 토큰 빈도(요약 가중/라벨링에 사용)
+    ss.setdefault("kb_actions", [])           # 업로드로 학습한 행동 문장 후보
+    ss.setdefault("kb_questions", [])         # 업로드로 학습한 질문 문장 후보
+    ss.setdefault("domain_toggle", False)     # 템플릿 적용 토글(보수적)
     ss.setdefault("seed_loaded", False)
-    ss.setdefault("last_file_diag", {})
-    ss.setdefault("last_extracted_cache", "")
+    ss.setdefault("last_file_diag", {})       # 파일 진단 로그(문자수/메모 등)
+    ss.setdefault("last_extracted_cache", "") # 직전 추출 텍스트
 _init_once()
 
 # -------------------- 한글 조사지원 --------------------
+# - “을/를” 목적격 자동 판단, 띄어쓰기/어색한 구간 정리 등
 def _has_final_consonant(k: str) -> bool:
     if not k: return False
     ch = k[-1]
@@ -106,6 +147,7 @@ def tidy_korean_spaces(s: str) -> str:
     return s.strip()
 
 # -------------------- 전처리/패턴 --------------------
+# - 포스터 메타/배포처/링크 등 노이즈 제거 → 문장화
 NOISE_PATTERNS = [
     r"^제?\s?\d{4}\s?[-.]?\s?\d+\s?호$", r"^(동절기\s*주요사고|안전작업방법|콘텐츠\s*링크|책자\s*OPS|숏폼\s*OPS)$",
     r"^(포스터|책자|스티커|콘텐츠 링크)$", r"^(스마트폰\s*APP|중대재해\s*사이렌|산업안전포털|고용노동부)$",
@@ -135,9 +177,11 @@ LABEL_DROP_PAT = [
 RISK_KEYWORDS = dict(SEED_RISK_MAP)
 
 def tokens(s: str) -> List[str]:
+    # 간단 토크나이저(한글/영문/숫자 2글자 이상)
     return rxx.findall(r"[가-힣a-z0-9]{2,}", s.lower())
 
 def normalize_text(t: str) -> str:
+    # 폼피드 제거/공백 정리
     t = t.replace("\x0c","\n")
     t = re.sub(r"[ \t]+\n","\n", t)
     t = re.sub(r"\n{3,}","\n\n", t)
@@ -155,9 +199,11 @@ def strip_noise_line(line: str) -> str:
     return s
 
 def _looks_like_heading(s: str) -> bool:
+    # "안전작업방법:" 같은 머릿말은 다음 줄과 결합
     return bool(re.search(r"(방법|수칙|대책|안전조치|예방)\s*[:：]?$", s))
 
 def merge_broken_lines(lines: List[str]) -> List[str]:
+    # 포스터 줄바꿈을 자연어 문장으로 복구
     out, buf = [], ""
     for raw in lines:
         s = strip_noise_line(raw)
@@ -181,6 +227,7 @@ def merge_broken_lines(lines: List[str]) -> List[str]:
     return out
 
 def combine_date_with_next(lines: List[str]) -> List[str]:
+    # "2025.7.1." → 다음 줄 사고문과 결합하여 “yyyy년 m월 d일, …사고”
     out = []; i = 0
     while i < len(lines):
         cur = strip_noise_line(lines[i])
@@ -199,6 +246,7 @@ CASE_JOIN_TRIG = ("쓰러지자","구조하던 중","차례로","이어","이후
 CASE_KEYWORDS = ("사망","사상","중독","추락","붕괴","낙하","질식","끼임","깔림","부딪힘","감전","폭발")
 
 def stitch_case_blocks(sents: List[str]) -> List[str]:
+    # 인접한 사고 서술을 연결어/키워드로 감지하여 한 문장으로 합침
     if not sents: return sents
     out = []; i = 0
     while i < len(sents):
@@ -214,6 +262,7 @@ def stitch_case_blocks(sents: List[str]) -> List[str]:
             else:
                 break
         out.append(merged); i = j if merged_any else i + 1
+    # 중복 제거
     seen, dedup = set(), []
     for s in out:
         k = re.sub(r"\s+","", s)
@@ -222,6 +271,7 @@ def stitch_case_blocks(sents: List[str]) -> List[str]:
     return dedup
 
 def preprocess_text_to_sentences(text: str) -> List[str]:
+    # 전처리 전체 파이프라인 → 문장 리스트 반환
     text = normalize_text(text)
     raw_lines = [ln for ln in text.splitlines() if ln.strip()]
     lines = merge_broken_lines(raw_lines)
@@ -253,6 +303,7 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
     except Exception:
         t = ""
     t = normalize_text(t)
+    # pypdfium2 로 스캔/빈 문서 추정 경고(추출은 하지 않음)
     if len(t.strip()) < 10:
         try:
             with io.BytesIO(b) as bio:
@@ -261,6 +312,7 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
                     st.warning("⚠️ 이미지/스캔 PDF로 보입니다. 현재 OCR 미지원.")
         except Exception:
             pass
+    # 진단 로그(사이드바 expander에 표시)
     st.session_state["last_file_diag"] = {
         "name": fname, "size_bytes": len(b), "extracted_chars": len(t),
         "note": "empty_or_scanned" if (len(t.strip()) < 10) else "ok"
@@ -268,10 +320,16 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
     return t
 
 # -------------------- 요약/가중 --------------------
+# - 아래 4개 함수가 “AI 요약”의 핵심(오픈소스만 사용, 자체구현)
+#   1) tokens_for_vec → 토큰화
+#   2) sentence_tfidf_vectors → TF-IDF 벡터 + 세션 KB 가중(Boost)
+#   3) textrank_scores → 페이지랭크 유사 랭킹
+#   4) mmr_select → 중복 억제(관련성/다양성 균형)
 def tokens_for_vec(s: str) -> List[str]:
     return tokens(s)
 
 def sentence_tfidf_vectors(sents: List[str], kb_boost: Dict[str, float] = None) -> Tuple[np.ndarray, List[str]]:
+    # 문장 → TF-IDF 행렬 (vocab 동시 구성), KB 용어는 가중치 승수
     toks = [tokens_for_vec(s) for s in sents]
     vocab: Dict[str,int] = {}
     for ts in toks:
@@ -291,18 +349,22 @@ def sentence_tfidf_vectors(sents: List[str], kb_boost: Dict[str, float] = None) 
     N = float(len(sents))
     idf = np.log((N+1.0)/(df+1.0)) + 1.0
     M *= idf
+    # KB 토큰은 최종적으로도 약간의 승수 부여(맥락 강조)
     if kb_boost:
         for t, idx in vocab.items():
             if t in kb_boost: M[:, idx] *= (1.0 + 0.2*kb_boost[t])
+    # 문장 벡터 정규화
     M /= (np.linalg.norm(M, axis=1, keepdims=True) + 1e-8)
     return M, list(vocab.keys())
 
 def cosim(X: np.ndarray) -> np.ndarray:
+    # 코사인 유사도 행렬(대각 0)
     if X.size == 0: return np.zeros((X.shape[0], X.shape[0]), dtype=np.float32)
     S = np.clip(X @ X.T, 0.0, 1.0); np.fill_diagonal(S, 0.0)
     return S
 
 def textrank_scores(sents: List[str], X: np.ndarray, d: float=0.85, max_iter: int=60, tol: float=1e-4) -> List[float]:
+    # PageRank 유사 수렴 방식으로 문장 중요도 산출
     n = len(sents)
     if n == 0: return []
     W = cosim(X); row = W.sum(axis=1, keepdims=True)
@@ -315,6 +377,7 @@ def textrank_scores(sents: List[str], X: np.ndarray, d: float=0.85, max_iter: in
     return [float(v) for v in r.flatten()]
 
 def mmr_select(sents: List[str], scores: List[float], X: np.ndarray, k: int, lam: float=0.7) -> List[int]:
+    # MMR: relevance(scores) - diversity(similarity) 최적화
     S = cosim(X); sel: List[int] = []; rem = set(range(len(sents)))
     while rem and len(sel) < k:
         best, val = None, -1e9
@@ -326,6 +389,7 @@ def mmr_select(sents: List[str], scores: List[float], X: np.ndarray, k: int, lam
     return sel
 
 def ai_extract_summary(text: str, limit: int=8) -> List[str]:
+    # ⛏️ 요약 파이프라인: 전처리 → TF-IDF → TextRank → MMR → 상위 k문장
     sents = preprocess_text_to_sentences(text)
     if not sents: return []
     kb = st.session_state["kb_terms"]; total = sum(kb.values()) or 1
@@ -336,6 +400,7 @@ def ai_extract_summary(text: str, limit: int=8) -> List[str]:
     return [sents[i] for i in idx]
 
 # -------------------- 템플릿/분류/NLG --------------------
+# - DOMAIN_TEMPLATES: 특정 키워드 집합이 본문과 문장 모두에서 감지될 때만 보수적으로 치환
 DOMAIN_TEMPLATES = [
     ({"비계","발판","갱폼","추락"}, "작업발판을 견고하게 설치하고 안전난간 및 추락방호망을 확보합니다."),
     ({"안전난간","난간","개구부"}, "개구부·개구창 등 추락 위험 구간에 안전난간을 설치합니다."),
@@ -348,6 +413,7 @@ DOMAIN_TEMPLATES = [
 def jaccard(a: set, b: set) -> float:
     return len(a & b) / (len(a | b) + 1e-8)
 
+# 행동/실천 추출용 동사 패턴 — “객체 + 동사(설치/점검/확인/…)+합니다.”로 자연화
 ACTION_VERBS = [
     "설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고",
     "교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수",
@@ -359,6 +425,7 @@ ACTION_PAT = (
 )
 
 def is_meaningful_sentence(s: str) -> bool:
+    # 너무 짧거나 “합니다.”만 남는 문장 제거
     raw = re.sub(r"\s+","", s)
     if len(raw) < 6:
         return False
@@ -367,6 +434,7 @@ def is_meaningful_sentence(s: str) -> bool:
     return True
 
 def soften(s: str) -> str:
+    # 서술 어투 일관화 + 메타토큰/불릿 제거
     s = s.replace("하여야","해야 합니다").replace("한다","합니다").replace("한다.","합니다.")
     s = s.replace("바랍니다","해주세요").replace("확인 바람","확인해주세요")
     s = s.replace("금지한다","금지합니다").replace("필요하다","필요합니다")
@@ -377,9 +445,10 @@ def soften(s: str) -> str:
     return tidy_korean_spaces(s)
 
 def is_accident_sentence(s: str) -> bool:
+    # 날짜/사망/사상/중독 등 키워드로 사고문 판별
     if any(w in s for w in ["예방","대책","지침","수칙"]):
         return False
-    return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|무너짐|낙하)", s))
+    return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|감전|폭발)", s))
 
 def is_prevention_sentence(s: str) -> bool:
     return any(w in s for w in ["예방","대책","지침","수칙","안전조치"])
@@ -388,6 +457,7 @@ def is_risk_sentence(s: str) -> bool:
     return any(w in s for w in ["위험","요인","원인","증상","결빙","강풍","폭염","미세먼지","회전체","비산","말림","추락","낙하","협착"])
 
 def _domain_template_apply(s: str, base_text: str) -> str:
+    # 토글이 켜진 경우에만, 본문/문장 모두에서 트리거 일치하면 보수적으로 템플릿 적용
     if not st.session_state.get("domain_toggle"): return s
     sent_toks = set(tokens(s)); base_toks = set(tokens(base_text))
     if jaccard(sent_toks, base_toks) < 0.05: return s
@@ -399,6 +469,7 @@ def _domain_template_apply(s: str, base_text: str) -> str:
     return best if best else s
 
 def to_action_sentence(s: str, base_text: str) -> str:
+    # “명사(목적어)+동사”로 자연화된 실천문 생성
     s2 = soften(s)
     s2 = re.sub(r"(위기탈출\s*안전보건)", "", s2).strip()
     s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
@@ -406,11 +477,12 @@ def to_action_sentence(s: str, base_text: str) -> str:
     s2_tpl = _domain_template_apply(s2, base_text)
     if s2_tpl != s2:
         txt = s2_tpl
-        if not txt.endswith(("다.","습니다.","합니다.")):
+        if not txt.endswith(("다.","합니다.","습니다.")):
             txt = txt.rstrip(" .") + " 합니다."
         return tidy_korean_spaces(txt)
     m = re.search(ACTION_PAT, s2)
     if not m:
+        # 동사가 없으면 명사부 추정 → “확인/설치 합니다.”로 보정
         nounish = re.sub(r"(의|에|에서|을|를|와|과|및)$","", s2).strip()
         if nounish and len(nounish) >= 4:
             guess_verb = "설치" if any(k in nounish for k in ["난간","방호망","발판","방호장치","장비","장치","표지"]) else "확인"
@@ -432,6 +504,7 @@ def to_action_sentence(s: str, base_text: str) -> str:
     return core.rstrip(" .") + " 합니다."
 
 def repair_action_fragments(lines: List[str]) -> List[str]:
+    # 줄바꿈으로 끊긴 예방조치 조각을 인접 문장과 합쳐 동사 포함 문장으로 복원
     out = []
     i = 0
     while i < len(lines):
@@ -455,6 +528,7 @@ def repair_action_fragments(lines: List[str]) -> List[str]:
     return out
 
 def classify_sentence(s: str) -> str:
+    # 간단 분류기: 사고/위험/행동/질문/기타
     if is_accident_sentence(s): return "case"
     if re.search(ACTION_PAT, s) or is_prevention_sentence(s): return "action"
     if is_risk_sentence(s): return "risk"
@@ -463,6 +537,7 @@ def classify_sentence(s: str) -> str:
 
 # -------------------- KB 누적/시드 --------------------
 def seed_kb_once():
+    # 최초 1회: 시드 말뭉치 주입 + 위험 키워드 가중
     if not st.session_state["seed_loaded"]:
         for t, k in SEED_RISK_MAP.items():
             if t not in RISK_KEYWORDS: RISK_KEYWORDS[t] = k
@@ -476,12 +551,14 @@ def seed_kb_once():
         st.session_state["seed_loaded"] = True
 
 def kb_ingest_text(text: str) -> None:
+    # 업로드 텍스트를 세션 KB에 누적(용어/행동/질문 추출)
     if not (text or "").strip(): return
     sents = preprocess_text_to_sentences(text)
     for s in sents:
         for t in tokens(s):
             if len(t) >= 2:
                 st.session_state["kb_terms"][t] += 1
+                # 위험 키워드는 자동 등록
                 if re.search(r"(추락|낙하|깔림|끼임|중독|질식|화재|폭발|감전|폭염|붕괴|비계|갱폼|예초|벌목|컨베이어|크레인|지붕|선반|천공)", t):
                     if t not in RISK_KEYWORDS: RISK_KEYWORDS[t] = t
     action_candidates = [s for s in sents if (re.search(ACTION_PAT, s) or is_prevention_sentence(s))]
@@ -497,6 +574,7 @@ def kb_ingest_text(text: str) -> None:
                 st.session_state["kb_questions"].append(q)
 
 def kb_prune() -> None:
+    # 메모리/중복 관리(순서 보존 중복제거)
     def dedup_keep_order(lst: List[str]) -> List[str]:
         seen, out = set(), []
         for x in lst:
@@ -509,6 +587,7 @@ def kb_prune() -> None:
     st.session_state["kb_terms"] = Counter(dict(st.session_state["kb_terms"].most_common(2000)))
 
 def kb_match_candidates(cands: List[str], base_text: str, limit: int, min_sim: float = 0.12) -> List[str]:
+    # 본문과 교집합이 많은 행동/질문을 우선 추천(Jaccard)
     bt = set(tokens(base_text))
     present_risks = {t for t in bt if (t in RISK_KEYWORDS or t in RISK_KEYWORDS.values())}
     scored: List[Tuple[float,str]] = []
@@ -525,6 +604,7 @@ def kb_match_candidates(cands: List[str], base_text: str, limit: int, min_sim: f
 
 # -------------------- 생성기 --------------------
 def naturalize_case_sentence(s: str) -> str:
+    # 사고문 자연화: 날짜/사망자수/의식불명 등 정보를 보강해 “~사고가 발생했습니다.”
     s = soften(s)
     death = re.search(r"사망\s*(\d+)\s*명", s)
     inj = re.search(r"사상\s*(\d+)\s*명", s)
@@ -552,6 +632,7 @@ def naturalize_case_sentence(s: str) -> str:
     return tidy_korean_spaces((date_txt + s).strip())
 
 def make_structured_script(text: str, max_points: int=6) -> str:
+    # “자연스러운 교육대본(무료)” 생성기
     topic_label = dynamic_topic_label(text)
     core = [soften(s) for s in ai_extract_summary(text, max_points)]
     if not core:
@@ -600,6 +681,7 @@ def make_structured_script(text: str, max_points: int=6) -> str:
     return "\n".join(lines)
 
 def make_concise_report(text: str, max_points: int=6) -> str:
+    # “핵심요약” 생성기 — 사고/위험/실천 요약 블록 구성
     sents = ai_extract_summary(text, max_points)
     sents = [soften(s) for s in sents if not re.match(r"(배포처|주소|홈페이지|VR|리플릿)", s)]
     if not sents:
@@ -640,6 +722,7 @@ def make_concise_report(text: str, max_points: int=6) -> str:
 
 # -------------------- 라벨/토픽 --------------------
 def drop_label_token(t: str) -> bool:
+    # 라벨(제목)용 불용어/메타 토큰 제거 규칙
     if t in STOP_TERMS: return True
     for pat in LABEL_DROP_PAT:
         if re.match(pat, t): return True
@@ -648,6 +731,7 @@ def drop_label_token(t: str) -> bool:
     return False
 
 def top_terms_for_label(text: str, k: int=3) -> List[str]:
+    # 텍스트 + KB 빈도 기반 상위 토큰 추출 → 위험 키워드 보너스 가중
     doc_cnt = Counter([t for t in tokens(text) if not drop_label_token(t)])
     bonus = Counter()
     for t in list(doc_cnt.keys()):
@@ -667,6 +751,7 @@ def top_terms_for_label(text: str, k: int=3) -> List[str]:
     return [t for t,_ in cand[:k]]
 
 def dynamic_topic_label(text: str) -> str:
+    # 상위 토큰을 위험군으로 매핑해 “{위험군} 재해예방” 형태 라벨 생성
     terms = top_terms_for_label(text, k=3)
     risks = [RISK_KEYWORDS.get(t, t) for t in terms if t in RISK_KEYWORDS or t in RISK_KEYWORDS.values()]
     extra = [t for t in terms if t not in risks]
@@ -681,10 +766,12 @@ def dynamic_topic_label(text: str) -> str:
 # -------------------- DOCX --------------------
 _XML_FORBIDDEN = r"[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]"
 def _xml_safe(s: str) -> str:
+    # Word XML 금지문자 제거(다운로드 시 깨짐 방지)
     if not isinstance(s, str): s = "" if s is None else str(s)
     return rxx.sub(_XML_FORBIDDEN, "", s)
 
 def to_docx_bytes(script: str) -> bytes:
+    # python-docx로 문서화(글꼴: Malgun Gothic, 11pt)
     doc = Document()
     try:
         style = doc.styles["Normal"]; style.font.name = "Malgun Gothic"; style.font.size = Pt(11)
@@ -707,9 +794,10 @@ with st.sidebar:
 1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
 2) **사고 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
 3) TextRank + MMR 요약 (**세션 KB 가중치** 반영)  
-4) 규칙형 NLG: 조사/띄어쓰기·종결 보정, **예방조치 조각 결합 및 문맥 보정**  
+4) 규칙형 NLG: 조사/띄어쓰기·종결 보정, **예방조치 줄결합 및 문맥 보정**  
 5) 결과 포맷: **자연스러운 교육대본(무료)** / **핵심요약**
 """)
+    # 템플릿 토글(보수적 적용) — 켜면 키워드 매칭 강할 때만 문장 치환
     st.session_state["domain_toggle"] = st.toggle(
         "🔧 도메인 템플릿 강화(신중 적용)",
         value=False,
@@ -720,6 +808,7 @@ seed_kb_once()
 st.title("🦺 OPS/포스터를 교육 대본으로 자동 변환 (완전 무료)")
 
 def reset_all():
+    # 전체 초기화(세션 KB/업로더 키 등 리셋)
     st.session_state.pop("manual_text", None)
     st.session_state.pop("edited_text", None)
     st.session_state.pop("zip_choice", None)
@@ -770,6 +859,7 @@ with col1:
                         if name.lower().endswith(".pdf"):
                             data = zf.read(name); zip_pdfs[name] = data
                 if zip_pdfs:
+                    # ZIP 내 모든 PDF를 우선 학습(KB), 첫 문서를 미리보기로 열기
                     for nm, data in zip_pdfs.items():
                         txt_all = read_pdf_text_from_bytes(data, fname=f"{fname}::{nm}")
                         if txt_all.strip():
@@ -816,6 +906,7 @@ with col1:
     edited_text = st.text_area("텍스트", value=base_text, height=240, key="edited_text")
 
     with st.expander("🧪 파일 읽기 진단(Log-lite)", expanded=False):
+        # PDF/ZIP 처리 결과 요약(문자수/메모 등) — 디버깅/시연용
         diag = st.session_state.get("last_file_diag", {})
         if diag:
             st.write({
