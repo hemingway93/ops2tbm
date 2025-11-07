@@ -131,7 +131,18 @@ def tidy_korean_spaces(s: str) -> str:
 
 # -------------------- 전처리 파이프라인 --------------------
 NOISE_PATTERNS = [
-    r"^제?\s?\d{4}\s?[-.]?\s?\d+\s?호$",
+    r"^제?\s?\d{4}\s?[-.
+    r"^동절기\s*안전보건\s*OPS$",
+    r"^화재[·\.\s]*폭발\s*동영상$",
+    r"^교량작업\s*교안$",
+    r"^교량설치작업\s*동영상$",
+    r"^스마트폰\s*APP\s*‘?위기탈출\s*안전보건’?\s*설치$",
+    r"^포털사이트\s*‘?안전보건공단’?\s*검색$",
+    r"^고용노동부\s*\'중대재해\s*사이렌\'$",
+    r"^콘텐츠\s*링크$",
+    r"^안전작업방법$",
+    r"^주요사고개요$",
+    r"^PowerPoint\s*프레젠테이션$",]?\s?\d+\s?호$",
     r"^(동절기\s*주요사고|안전작업방법|콘텐츠\s*링크|책자\s*OPS|숏폼\s*OPS)$",
     r"^(포스터|책자|스티커|콘텐츠 링크)$",
     r"^(스마트폰\s*APP|중대재해\s*사이렌|산업안전포털|고용노동부)$",
@@ -140,7 +151,7 @@ NOISE_PATTERNS = [
     r"^VR\s+.*$", r"^리플릿\s+.*$", r"^동영상\s+.*$", r"^APP\s+.*$",
     r".*검색해\s*보세요.*$",
 ]
-BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2]+"
+BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2714\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
 DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
 META_PATTERNS = [
     r"<\s*\d+\s*명\s*사망\s*>", r"<\s*\d+\s*명\s*사상\s*>", r"<\s*\d+\s*명\s*의식불명\s*>",
@@ -232,8 +243,8 @@ def stitch_case_blocks(sents: List[str]) -> List[str]:
         while j < len(sents):
             nxt = sents[j].strip()
             cond_keyword = (any(k in cur for k in CASE_KEYWORDS) and any(k in nxt for k in CASE_KEYWORDS))
-            cond_trigger = (any(t in nxt for t in CASE_JOIN_TRIG) or any(t in cur for t in CASE_JOIN_TRIG))
-            if cond_keyword or cond_trigger:
+            cond_prev_like = bool(re.search(r"(예방|수칙|지침|안전조치|작업방법|허가|감시자|점검|차단|설치)", nxt))
+            if cond_keyword and not cond_prev_like:
                 sep = ", " if not merged.endswith(("다.","습니다.","했다.",".")) else " "
                 merged = tidy_korean_spaces(merged.rstrip(" .") + sep + nxt.lstrip(" ,"))
                 cur = merged; j += 1; merged_any = True
@@ -497,7 +508,8 @@ def is_meaningful_sentence(s: str) -> bool:
     return True
 
 def is_accident_sentence(s: str) -> bool:
-    if any(w in s for w in ["예방","대책","지침","수칙"]): return False
+    if any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법","허가","감시자","점검","차단","설치"]): return False
+    return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
     return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
 
 def is_prevention_sentence(s: str) -> bool:
@@ -511,7 +523,9 @@ def to_action_sentence(s: str, base_text: str) -> str:
     s2 = re.sub(r"(위기탈출\s*안전보건)", "", s2).strip()
     s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
     s2 = re.sub(r"\s*에\s*따라\s*", " 시 ", s2)
-    s2_tpl = _domain_template_apply(s2, base_text)
+    
+    s2 = re.sub(r"(?P<obj>[\\w가-힣·\\(\\)\\[\\]\\/\\- ]{2,})\\s*제거\\s*및\\s*차단", lambda m: add_obj_particle(m.group("obj").strip()) + " 제거하고 차단", s2)
+s2_tpl = _domain_template_apply(s2, base_text)
     if s2_tpl != s2:
         txt = s2_tpl
         if not txt.endswith(("다.","합니다.","습니다.")):
@@ -528,7 +542,7 @@ def to_action_sentence(s: str, base_text: str) -> str:
         return tidy_korean_spaces(txt)
     obj = (m.group("obj") or m.group("obj2") or "").strip()
     verb = (m.group("verb") or m.group("verb2") or "실시").strip()
-    if obj and not re.search(r"(을|를|에|에서|과|와|의)$", obj):
+    if obj and not re.search(r"(을|를|에|에서|과|와|의)$", obj) and not obj.strip().endswith("및"):
         obj = add_obj_particle(obj)
     prefix = "반드시 " if "설치" in verb else ("작업 전 " if verb in ("확인","점검","측정","기록","작성","지정") else "")
     core = tidy_korean_spaces(f"{prefix}{obj} {verb}")
@@ -699,8 +713,9 @@ def top_terms_for_label(text: str, k: int=3) -> List[str]:
                 doc_cnt[t] += 0.2 * c
     if not doc_cnt: return ["안전보건","교육"]
     commons = {"안전","교육","작업","현장","예방","조치","확인","관리","점검","가이드","지침"}
-    cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons and len(t) >= 2]
-    if not cand: cand = list(doc_cnt.items())
+    action_set = set(["설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고","교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정","실시"])
+cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons and t not in action_set and len(t) >= 2]
+if not cand: cand = list(doc_cnt.items())
     cand.sort(key=lambda x: x[1], reverse=True)
     return [t for t,_ in cand[:k]]
 
