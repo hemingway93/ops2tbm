@@ -49,6 +49,10 @@ from docx.shared import Pt
 # - pdfminer.six 정상 import (이전 'pdfminer_high_level' 오타로 인한 ModuleNotFoundError 방지)
 pdf_extract_text = None
 try:
+    from pdfminer_high_level import extract_text as _wrong_name  # 보호: 잘못된 임포트 방지 주석
+except Exception:
+    pass
+try:
     from pdfminer.high_level import extract_text as _extract_text
     pdf_extract_text = _extract_text
 except Exception:
@@ -106,6 +110,7 @@ def _init_once():
     ss.setdefault("kb_actions", [])          # 동적 수집된 행동 수칙 문장
     ss.setdefault("kb_questions", [])        # 동적 수집된 점검 질문
     ss.setdefault("domain_toggle", False)    # 템플릿 강화 토글(보수적 적용)
+    ss.setdefault("profile_km", False)       # 키 메세지(OPS) 전용 강건 파싱
     ss.setdefault("seed_loaded", False)      # 시드 KB 1회 주입 여부
     ss.setdefault("last_file_diag", {})      # 파일 진단(크기/추출문자수/메모)
     ss.setdefault("last_extracted_cache", "")# 최근 추출 텍스트 캐시
@@ -139,18 +144,6 @@ NOISE_PATTERNS = [
     r"^안전보건자료실.*$", r"^배포처\s+.*$", r"^홈페이지\s+.*$",
     r"^VR\s+.*$", r"^리플릿\s+.*$", r"^동영상\s+.*$", r"^APP\s+.*$",
     r".*검색해\s*보세요.*$",
-    # 추가 필터 (현장 자료 헤더/링크/홍보문구)
-    r"^동절기\s*안전보건\s*OPS$",
-    r"^화재[·\.\s]*폭발\s*동영상$",
-    r"^교량작업\s*교안$",
-    r"^교량설치작업\s*동영상$",
-    r"^스마트폰\s*APP\s*‘?위기탈출\s*안전보건’?\s*설치$",
-    r"^포털사이트\s*‘?안전보건공단’?\s*검색$",
-    r"^고용노동부\s*'중대재해\s*사이렌'$",
-    r"^콘텐츠\s*링크$",
-    r"^안전작업방법$",
-    r"^주요사고개요$",
-    r"^PowerPoint\s*프레젠테이션$",
 ]
 BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
 DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
@@ -171,6 +164,10 @@ LABEL_DROP_PAT = [
     r"^\d+$", r"^\d{2,4}[-_]\d{1,}$", r"^\d{4}$", r"^(제)?\d+호$", r"^(호|호수|호차)$",
     r"^(사업장|업체|소재|소재지|장소|지역)$", r"^\d+\s*(명|건)$"
 ]
+# 키 메세지 전용 힌트/마커
+PREV_HINT = r"(예방|수칙|지침|안전조치|작업방법|허가|감시자|점검|차단|설치|준수|배치)"
+BUL_MARK = r"[✓✔]"
+PROMO_TAIL = r"(동영상|교안|포털|검색|사이렌)"
 
 RISK_KEYWORDS = dict(SEED_RISK_MAP)  # 세션 학습으로 계속 보강
 
@@ -193,30 +190,60 @@ def strip_noise_line(line: str) -> str:
     s = re.sub(r"https?://\S+","", s).strip()
     s = s.strip("•●▪▶▷·-—–,")
     s = re.sub(r"(안전작업방법|콘텐츠\s*링크|주요사고개요)$","", s).strip()
-    s = s.replace("작업전","작업 전").replace("허가철저","허가 철저").replace("비산방지조치","비산 방지조치")
+    # 키메세지 특성 꼬리 제거
+    s = re.sub(rf"({PROMO_TAIL})$", "", s).strip()
     return s
 
 def _looks_like_heading(s: str) -> bool:
     return bool(re.search(r"(방법|수칙|대책|안전조치|예방|작업방법|사고사례|주요\s*사고사례)\s*[:：]?$", s))
 
+def split_inline_check_bullets(s: str) -> List[str]:
+    """한 줄에 체크표(, ✓, ✔)가 여러 개 있을 때 분할하여 불릿 후보로 전달"""
+    if not re.search(BUL_MARK, s):
+        return [s]
+    parts = re.split(rf"{BUL_MARK}\s*", s)
+    out: List[str] = []
+    for idx, p in enumerate(parts):
+        p = p.strip(" -•·\t")
+        if not p: continue
+        # 앞머리는 보통 헤더/문맥. 과도한 메타는 제거
+        if idx == 0 and len(parts) > 1:
+            if len(p) < 120 and not re.search(PROMO_TAIL, p):
+                out.append(p)
+        else:
+            out.append(p)
+    return out
+
 def merge_broken_lines(lines: List[str]) -> List[str]:
     out, buf = [], ""
     for raw in lines:
-        s = strip_noise_line(raw)
-        if not s: continue
-        if _looks_like_heading(s) or s.endswith((":", "：", "-", "·")):
-            if buf: out.append(buf)
-            buf = s; continue
-        if buf:
-            if buf.endswith((":", "：", "-", "·")):
-                buf = tidy_korean_spaces(buf.rstrip(" :：-·") + " " + s); continue
-            if (len(buf) < 20 and not re.search(r"[.?!다]$", buf)) or (len(s) < 20 and not re.search(r"[.?!다]$", s)):
-                buf = tidy_korean_spaces(buf + " " + s); continue
-            if not re.search(r"[.?!다]$", buf):
-                buf = tidy_korean_spaces(buf + " " + s); continue
-            out.append(buf); buf = s
-        else:
-            buf = s
+        # 체크표 내장 줄은 먼저 분해
+        chunks = split_inline_check_bullets(raw)
+        for chunk in chunks:
+            s = strip_noise_line(chunk)
+            if not s: 
+                continue
+            if _looks_like_heading(s) or s.endswith((":", "：", "-", "·")):
+                if buf: out.append(buf)
+                buf = s; 
+                continue
+            if buf:
+                # 체크표가 포함된 원문과는 결합 금지
+                if re.search(BUL_MARK, raw):
+                    out.append(buf); buf = s; 
+                    continue
+                if buf.endswith((":", "：", "-", "·")):
+                    buf = tidy_korean_spaces(buf.rstrip(" :：-·") + " " + s); 
+                    continue
+                if (len(buf) < 20 and not re.search(r"[.?!다]$", buf)) or (len(s) < 20 and not re.search(r"[.?!다]$", s)):
+                    buf = tidy_korean_spaces(buf + " " + s); 
+                    continue
+                if not re.search(r"[.?!다]$", buf):
+                    buf = tidy_korean_spaces(buf + " " + s); 
+                    continue
+                out.append(buf); buf = s
+            else:
+                buf = s
     if buf: out.append(buf)
     return out
 
@@ -225,13 +252,18 @@ def combine_date_with_next(lines: List[str]) -> List[str]:
     while i < len(lines):
         cur = strip_noise_line(lines[i])
         if re.search(DATE_PAT, cur) and (i+1) < len(lines):
-            nxt = strip_noise_line(lines[i+1])
-            if re.search(r"(사망|사상|사고|중독|화재|붕괴|질식|추락|깔림|부딪힘|감전|폭발)", nxt):
+            nxt_raw = lines[i+1]
+            nxt = strip_noise_line(nxt_raw)
+            # 다음 줄: 사고 키워드 + (예방/체크표/장문 아님) 일 때만 결합
+            is_acc = bool(re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", nxt))
+            looks_prev = bool(re.search(PREV_HINT, nxt)) or bool(re.search(BUL_MARK, nxt_raw)) or len(nxt) > 120
+            if is_acc and not looks_prev:
                 m = re.search(DATE_PAT, cur)
                 y, mo, d = m.groups()
                 y = int(str(y).replace("’","").replace("'","")); y = 2000 + y if y < 100 else y
                 out.append(f"{int(y)}년 {int(mo)}월 {int(d)}일, {nxt}")
-                i += 2; continue
+                i += 2; 
+                continue
         out.append(cur); i += 1
     return out
 
@@ -246,7 +278,7 @@ def stitch_case_blocks(sents: List[str]) -> List[str]:
         while j < len(sents):
             nxt = sents[j].strip()
             cond_keyword = (any(k in cur for k in CASE_KEYWORDS) and any(k in nxt for k in CASE_KEYWORDS))
-            cond_prev_like = bool(re.search(r"(예방|수칙|지침|안전조치|작업방법|허가|감시자|점검|차단|설치)", nxt))
+            cond_prev_like = bool(re.search(PREV_HINT, nxt))
             if cond_keyword and not cond_prev_like:
                 sep = ", " if not merged.endswith(("다.","습니다.","했다.",".")) else " "
                 merged = tidy_korean_spaces(merged.rstrip(" .") + sep + nxt.lstrip(" ,"))
@@ -301,7 +333,7 @@ def _is_header(line: str, hdrs: List[re.Pattern]) -> bool:
     return any(h.search(s) for h in hdrs)
 
 def _is_bullet(line: str) -> bool:
-    return bool(re.match(BULLET_PREFIX, line.strip()) or re.match(r"^\s*[\-·•▶▷\*]\s+", line.strip()))
+    return bool(re.match(BULLET_PREFIX, line.strip()) or re.match(r"^\s*[\-·•▶▷\*]\s+", line.strip()) or re.search(BUL_MARK, line))
 
 def extract_section_bullets(text: str, which: str = "case") -> List[str]:
     lines = split_keep_lines(text)
@@ -322,7 +354,9 @@ def extract_section_bullets(text: str, which: str = "case") -> List[str]:
             clean = strip_noise_line(raw)
             if not clean:
                 continue
-            items.append(clean)
+            # 체크표 한 줄 내 다중 항목 분해
+            for ck in split_inline_check_bullets(clean):
+                if ck: items.append(ck)
     merged = merge_broken_lines(items)
     return [x for x in merged if len(re.sub(r"\s+","", x)) >= 2]
 
@@ -343,7 +377,10 @@ def cluster_bullets(text: str) -> List[List[str]]:
     cur: List[str] = []
     for ln in lines:
         if _is_bullet(ln):
-            cur.append(strip_noise_line(ln))
+            # 체크표 내장 분해
+            for ck in split_inline_check_bullets(ln):
+                ck2 = strip_noise_line(ck)
+                if ck2: cur.append(ck2)
         else:
             if cur:
                 clusters.append(merge_broken_lines(cur))
@@ -361,7 +398,7 @@ def looks_case(s: str) -> bool:
     return bool(re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
 
 def looks_action(s: str) -> bool:
-    return bool(re.search(ACTION_PAT, s) or re.search(r"(예방|수칙|지침|안전조치|작업방법)", s))
+    return bool(re.search(ACTION_PAT, s) or re.search(PREV_HINT, s))
 
 def classify_cluster(cluster: List[str]) -> str:
     case_hits = sum(1 for x in cluster if looks_case(x))
@@ -511,7 +548,7 @@ def is_meaningful_sentence(s: str) -> bool:
     return True
 
 def is_accident_sentence(s: str) -> bool:
-    if any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법","허가","감시자","점검","차단","설치"]): return False
+    if any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법","허가","감시자","점검","차단","설치","준수","배치"]): return False
     return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
 
 def is_prevention_sentence(s: str) -> bool:
@@ -525,20 +562,21 @@ def to_action_sentence(s: str, base_text: str) -> str:
     s2 = re.sub(r"(위기탈출\s*안전보건)", "", s2).strip()
     s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
     s2 = re.sub(r"\s*에\s*따라\s*", " 시 ", s2)
+    # ‘제거 및 차단’ → ‘제거하고 차단’ (조사 중복 방지)
+    s2 = re.sub(
+        r"(?P<obj>[\w가-힣·\(\)\[\]\/\- ]{2,})\s*제거\s*및\s*차단",
+        lambda m: add_obj_particle(m.group('obj').strip()) + " 제거하고 차단",
+        s2
+    )
     s2_tpl = _domain_template_apply(s2, base_text)
     if s2_tpl != s2:
         txt = s2_tpl
         if not txt.endswith(("다.","합니다.","습니다.")):
             txt = txt.rstrip(" .") + " 합니다."
         return tidy_korean_spaces(txt)
-    s2 = re.sub(
-        r"(?P<obj>[\w가-힣·\(\)\[\]\/\- ]{2,})\s*제거\s*및\s*차단",
-        lambda m: add_obj_particle(m.group('obj').strip()) + " 제거하고 차단",
-        s2
-    )
     m = re.search(ACTION_PAT, s2)
     if not m:
-        nounish = re.sub(r"(의|에|에서|을|를|와|과|및)$", "", s2).strip()
+        nounish = re.sub(r"(의|에|에서|을|를|와|과|및)$","", s2).strip()
         if nounish and len(nounish) >= 4:
             guess_verb = "설치" if any(k in nounish for k in ["난간","방호망","발판","방호장치","장비","장치","표지"]) else "확인"
             obj = add_obj_particle(nounish)
@@ -547,10 +585,13 @@ def to_action_sentence(s: str, base_text: str) -> str:
         return tidy_korean_spaces(txt)
     obj = (m.group("obj") or m.group("obj2") or "").strip()
     verb = (m.group("verb") or m.group("verb2") or "실시").strip()
-    if obj and not re.search(r"(을|를|에|에서|과|와|의)$", obj) and not obj.endswith("및"):
+    # 이미 조사 있거나 '…및'으로 끝나면 추가 부착 금지
+    if obj and not re.search(r"(을|를)$", obj) and not obj.endswith("및"):
         obj = add_obj_particle(obj)
     prefix = "반드시 " if "설치" in verb else ("작업 전 " if verb in ("확인","점검","측정","기록","작성","지정") else "")
     core = tidy_korean_spaces(f"{prefix}{obj} {verb}")
+    # 최종 방어: ‘하고를’ 같은 비문 교정
+    core = re.sub(r"하고를\s+차단", "하고 차단", core)
     if re.fullmatch(r"(반드시 |작업 전 )?\s*(을|를)\s*(실시|관리|운영)\s*$", core):
         if obj.strip():
             core = tidy_korean_spaces(f"{prefix}{obj} 실시")
@@ -564,14 +605,14 @@ def repair_action_fragments(lines: List[str]) -> List[str]:
     while i < len(lines):
         cur = soften(lines[i])
         cur_no_sp = re.sub(r"\s+","", cur)
-        has_verb = bool(re.search(ACTION_PAT, cur)) or any(v in cur for v in ["합니다","한다","실시","설치","착용","점검","확인","배치"])
+        has_verb = bool(re.search(ACTION_PAT, cur)) or any(v in cur for v in ["합니다","한다","실시","설치","착용","점검","확인","배치","가동"])
         if (len(cur_no_sp) < 20) and (not has_verb):
             merged = cur
             j = i + 1
             while j < len(lines):
                 nxt = soften(lines[j])
                 merged = tidy_korean_spaces(merged + " " + nxt)
-                if re.search(ACTION_PAT, merged) or any(v in merged for v in ["합니다","한다","실시","설치","착용","점검","확인","배치"]):
+                if re.search(ACTION_PAT, merged) or any(v in merged for v in ["합니다","한다","실시","설치","착용","점검","확인","배치","가동"]):
                     break
                 j += 1
             out.append(merged); i = j + 1
@@ -630,7 +671,10 @@ def kb_match_candidates(cands: List[str], base_text: str, limit: int, min_sim: f
     bt = set(tokens(base_text))
     present_risks = {t for t in bt if (t in RISK_KEYWORDS or t in RISK_KEYWORDS.values())}
     scored: List[Tuple[float,str]] = []
+    commons = {"철저","작업방법","안전작업방법","허가","감시자","점검","설치","준수"} if st.session_state.get("profile_km") else set()
     for c in cands:
+        if any(w in c for w in commons):
+            continue
         ct = set(tokens(c))
         cand_risks = {RISK_KEYWORDS.get(t, t) for t in ct if (t in RISK_KEYWORDS or t in RISK_KEYWORDS.values())}
         if cand_risks and not (cand_risks & present_risks):
@@ -680,7 +724,7 @@ def fallback_extract_cases(text: str, sents: List[str]) -> List[str]:
         k = re.sub(r"\s+","", x)
         if k not in seen:
             seen.add(k); out.append(x)
-    return out
+    return out[:6]
 
 def fallback_extract_preventions(text: str, sents: List[str]) -> List[str]:
     from_cluster = extract_clusters_by_type(text, "action")
@@ -693,7 +737,7 @@ def fallback_extract_preventions(text: str, sents: List[str]) -> List[str]:
         k = re.sub(r"\s+","", x)
         if k not in seen:
             seen.add(k); out.append(x)
-    return out
+    return out[:12]
 
 # -------------------- 라벨링 --------------------
 def drop_label_token(t: str) -> bool:
@@ -701,6 +745,9 @@ def drop_label_token(t: str) -> bool:
     for pat in LABEL_DROP_PAT:
         if re.match(pat, t): return True
     if t in {"소재","소재지","지역","장소","버스","영업소","업체","자료","키","메세지","명","안전보건"}:
+        return True
+    # 키메세지 모드: 수식/메타 단어 추가 제외
+    if st.session_state.get("profile_km") and t in {"철저","작업방법","안전작업방법","허가","감시자","점검","설치","준수"}:
         return True
     return False
 
@@ -718,6 +765,8 @@ def top_terms_for_label(text: str, k: int=3) -> List[str]:
                 doc_cnt[t] += 0.2 * c
     if not doc_cnt: return ["안전보건","교육"]
     commons = {"안전","교육","작업","현장","예방","조치","확인","관리","점검","가이드","지침"}
+    if st.session_state.get("profile_km"):
+        commons |= {"철저","작업방법","안전작업방법","허가","감시자","설치","준수"}
     action_set = set(["설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고","교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정","실시"])
     cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons and t not in action_set and len(t) >= 2]
     if not cand: cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons]
@@ -908,6 +957,12 @@ with st.sidebar:
         "🔧 도메인 템플릿 강화(신중 적용)",
         value=False,
         help="문장·본문 트리거 일치 + 유사도 기준 충족 시에만 템플릿을 소극적으로 적용합니다."
+    )
+    # 키 메세지(OPS) 전용 강건 파싱 토글 (UI 최소 변경)
+    st.session_state["profile_km"] = st.toggle(
+        "🧾 키 메세지 모드(강건 파싱)",
+        value=True,
+        help="키 메세지(OPS) 포맷에서 날짜/체크표/홍보 꼬리를 더 엄격하게 처리합니다."
     )
 
 seed_kb_once()
