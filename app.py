@@ -1,6 +1,6 @@
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
-# v2025-11-06-a
+# v2025-11-07-c (키메세지 전처리 보강: 내부 홍보꼬리 제거 + 행동동사 확대 + 헤더 별칭 추가)
 #
 # [제출용 기술 주석: 구현 & 스택]
 # - 구현 형태: Web App (Streamlit) — 단일 파일 app.py, 서버/로컬 어디서든 실행 가능
@@ -46,23 +46,17 @@ from docx import Document
 from docx.shared import Pt
 
 # ---------- [PDF 텍스트 추출 계층 — pdfminer 우선 / pdfium 진단] ----------
-# - pdfminer.six 정상 import (이전 'pdfminer_high_level' 오타로 인한 ModuleNotFoundError 방지)
 pdf_extract_text = None
-try:
-    from pdfminer_high_level import extract_text as _wrong_name  # 보호: 잘못된 임포트 방지 주석
-except Exception:
-    pass
 try:
     from pdfminer.high_level import extract_text as _extract_text
     pdf_extract_text = _extract_text
 except Exception:
-    pdf_extract_text = None  # 환경에 따라 pdfminer 미존재 시도 허용(텍스트 박스 복붙으로도 사용 가능)
+    pdf_extract_text = None
 
-# pypdfium2: 스캔/이미지 PDF일 가능성을 경고(현재 OCR 미지원)
 try:
     import pypdfium2 as pdfium
 except Exception:
-    pdfium = None  # pdfium 미설치 환경도 동작 가능(진단만 누락)
+    pdfium = None
 
 # ---------- [Streamlit UI 설정 — 레이아웃 유지] ----------
 st.set_page_config(page_title="OPS2TBM", page_icon="🦺", layout="wide")
@@ -87,7 +81,7 @@ SEED_ACTIONS = [
     "작업 전 작업계획서 작성 및 작업지휘자 지정","개인보호구 착용(안전모·보호안경·안전화 등)",
     "화기작업 허가 및 안전점검","정비·청소·점검 시 기계 전원 차단",
     "밀폐공간 작업 시 산소·유해가스 농도 측정","위험물질 취급 시 MSDS 비치·게시 및 교육",
-    "위험물질 취급 시 불침투성 보호복·방독마스크 착용","환기 실시 및 감시인 배치"
+    "위험물질 취급 시 불침투성 보호복·방독마스크 착착","환기 실시 및 감시인 배치"
 ]
 SEED_QUESTIONS = [
     "작업 전 작업계획서와 위험성평가를 검토했습니까?",
@@ -106,14 +100,14 @@ SEED_QUESTIONS = [
 def _init_once():
     ss = st.session_state
     ss.setdefault("uploader_key", 0)
-    ss.setdefault("kb_terms", Counter())     # 동적 용어(토큰) 빈도 — TF-IDF 가중치에 반영
-    ss.setdefault("kb_actions", [])          # 동적 수집된 행동 수칙 문장
-    ss.setdefault("kb_questions", [])        # 동적 수집된 점검 질문
-    ss.setdefault("domain_toggle", False)    # 템플릿 강화 토글(보수적 적용)
-    ss.setdefault("profile_km", False)       # 키 메세지(OPS) 전용 강건 파싱
-    ss.setdefault("seed_loaded", False)      # 시드 KB 1회 주입 여부
-    ss.setdefault("last_file_diag", {})      # 파일 진단(크기/추출문자수/메모)
-    ss.setdefault("last_extracted_cache", "")# 최근 추출 텍스트 캐시
+    ss.setdefault("kb_terms", Counter())
+    ss.setdefault("kb_actions", [])
+    ss.setdefault("kb_questions", [])
+    ss.setdefault("domain_toggle", False)
+    ss.setdefault("profile_km", True)   # 키메세지 모드 기본 ON
+    ss.setdefault("seed_loaded", False)
+    ss.setdefault("last_file_diag", {})
+    ss.setdefault("last_extracted_cache", "")
 _init_once()
 
 # -------------------- 한국어 조사/띄어쓰기 보정 --------------------
@@ -128,8 +122,18 @@ def add_obj_particle(noun: str) -> str:
     if not noun: return noun
     return f"{noun}{'을' if _has_final_consonant(noun[-1]) else '를'}"
 
+TERM_FIXES = [
+    (r"\b감\s*전\b","감전"),
+    (r"\b누전\s*차단기\b","누전차단기"),
+    (r"\b절연\s*용\s*보호구\b","절연용 보호구"),
+    (r"\b전\s*기\s*설\s*비\b","전기설비"),
+    (r"\b보\s*호\s*구\b","보호구"),
+]
+
 def tidy_korean_spaces(s: str) -> str:
     s = re.sub(r"\s+", " ", s)
+    for pat, rep in TERM_FIXES:
+        s = re.sub(pat, rep, s)
     s = s.replace("전충분한","전 충분한").replace("전충분히","전 충분히")
     s = re.sub(r"\s([,.])", r"\1", s)
     return s.strip()
@@ -145,11 +149,12 @@ NOISE_PATTERNS = [
     r"^VR\s+.*$", r"^리플릿\s+.*$", r"^동영상\s+.*$", r"^APP\s+.*$",
     r".*검색해\s*보세요.*$",
 ]
+# 인라인 체크표(/✓/✔) 포함 불릿
 BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
 DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
 META_PATTERNS = [
     r"<\s*\d+\s*명\s*사망\s*>", r"<\s*\d+\s*명\s*사상\s*>", r"<\s*\d+\s*명\s*의식불명\s*>",
-    r"<\s*사망\s*\d+\s*명\s*>", r"<\s*사상\s*\d+\s*명\s*>"
+    r"<\s*사망\s*\d+\s*명\s*>", r"<\s*사상\s*\d+\s*>"
 ]
 STOP_TERMS = set("""
 및 등 관련 사항 내용 예방 안전 작업 현장 교육 방법 기준 조치
@@ -164,12 +169,16 @@ LABEL_DROP_PAT = [
     r"^\d+$", r"^\d{2,4}[-_]\d{1,}$", r"^\d{4}$", r"^(제)?\d+호$", r"^(호|호수|호차)$",
     r"^(사업장|업체|소재|소재지|장소|지역)$", r"^\d+\s*(명|건)$"
 ]
-# 키 메세지 전용 힌트/마커
+# 예방 힌트/홍보 꼬리/체크표
 PREV_HINT = r"(예방|수칙|지침|안전조치|작업방법|허가|감시자|점검|차단|설치|준수|배치)"
 BUL_MARK = r"[✓✔]"
-PROMO_TAIL = r"(동영상|교안|포털|검색|사이렌)"
+PROMO_TAIL = r"(동영상|교안|포털|검색|사이렌|공단)$"
+# ★ 내부(문장 중간) 홍보 꼬리 제거용
+PROMO_MID = r"(‘?안전보건공단’?|산업안전보건공단|산업안전포털|안전보건포털|중대재해\s*사이렌|OPS|VR|동영상|교안|포털|검색)(?:\s*(보기|참조|검색|바로가기))?"
 
-RISK_KEYWORDS = dict(SEED_RISK_MAP)  # 세션 학습으로 계속 보강
+ACCIDENT_PAT = r"(사망|사상|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)(\s*추정)?"
+
+RISK_KEYWORDS = dict(SEED_RISK_MAP)
 
 def tokens(s: str) -> List[str]:
     return rxx.findall(r"[가-힣a-z0-9]{2,}", s.lower())
@@ -180,25 +189,38 @@ def normalize_text(t: str) -> str:
     t = re.sub(r"\n{3,}","\n\n", t)
     return t.strip()
 
+def strip_promo_inside(s: str) -> str:
+    # 문장 내부 삽입된 홍보 꼬리/기관명 블록을 안전하게 제거
+    s = re.sub(r"[‘'\"“”]?"+PROMO_MID+r"[’'\"“”]?", "", s)
+    # 괄호나 대시로 감싼 꼬리 제거
+    s = re.sub(r"[\(\[\{＜<]\s*"+PROMO_MID+r"\s*[\)\]\}＞>]", "", s)
+    # 쉼표 뒤에 오는 단독 꼬리 토막 제거
+    s = re.sub(r"(,\s*)?"+PROMO_MID+r"(\s*,)?", "", s)
+    return s
+
 def strip_noise_line(line: str) -> str:
     s = (line or "").strip()
     if not s: return ""
     s = re.sub(BULLET_PREFIX,"", s).strip()
     for pat in NOISE_PATTERNS:
-        if re.match(pat, s, re.IGNORECASE):
+        if re.search(pat, s, re.IGNORECASE):
             return ""
     s = re.sub(r"https?://\S+","", s).strip()
+    # 문장 내부 홍보 꼬리 제거
+    s = strip_promo_inside(s)
+    # 문장 끝 홍보 꼬리 제거
+    s = re.sub(r"(산업안전보건공단|안전보건공단|산업안전포털|안전보건포털)\s*$","", s).strip()
+    s = re.sub(r"(사고사례)\s*$","", s).strip()
     s = s.strip("•●▪▶▷·-—–,")
     s = re.sub(r"(안전작업방법|콘텐츠\s*링크|주요사고개요)$","", s).strip()
-    # 키메세지 특성 꼬리 제거
-    s = re.sub(rf"({PROMO_TAIL})$", "", s).strip()
+    s = re.sub(rf"{PROMO_TAIL}","", s).strip()
+    s = tidy_korean_spaces(s)
     return s
 
 def _looks_like_heading(s: str) -> bool:
-    return bool(re.search(r"(방법|수칙|대책|안전조치|예방|작업방법|사고사례|주요\s*사고사례)\s*[:：]?$", s))
+    return bool(re.search(r"(방법|수칙|대책|안전조치|예방|작업방법|사고사례|주요\s*사고사례|사고개요)\s*[:：]?$", s))
 
 def split_inline_check_bullets(s: str) -> List[str]:
-    """한 줄에 체크표(, ✓, ✔)가 여러 개 있을 때 분할하여 불릿 후보로 전달"""
     if not re.search(BUL_MARK, s):
         return [s]
     parts = re.split(rf"{BUL_MARK}\s*", s)
@@ -206,7 +228,8 @@ def split_inline_check_bullets(s: str) -> List[str]:
     for idx, p in enumerate(parts):
         p = p.strip(" -•·\t")
         if not p: continue
-        # 앞머리는 보통 헤더/문맥. 과도한 메타는 제거
+        # 앞머리에 붙은 '안전 작업방법'류 프리픽스 제거
+        p = re.sub(r"^(안전\s*작업\s*방법|안전작업방법)\s*", "", p)
         if idx == 0 and len(parts) > 1:
             if len(p) < 120 and not re.search(PROMO_TAIL, p):
                 out.append(p)
@@ -217,29 +240,27 @@ def split_inline_check_bullets(s: str) -> List[str]:
 def merge_broken_lines(lines: List[str]) -> List[str]:
     out, buf = [], ""
     for raw in lines:
-        # 체크표 내장 줄은 먼저 분해
         chunks = split_inline_check_bullets(raw)
         for chunk in chunks:
             s = strip_noise_line(chunk)
-            if not s: 
+            if not s:
                 continue
             if _looks_like_heading(s) or s.endswith((":", "：", "-", "·")):
                 if buf: out.append(buf)
-                buf = s; 
+                buf = s
                 continue
             if buf:
-                # 체크표가 포함된 원문과는 결합 금지
                 if re.search(BUL_MARK, raw):
-                    out.append(buf); buf = s; 
+                    out.append(buf); buf = s
                     continue
                 if buf.endswith((":", "：", "-", "·")):
-                    buf = tidy_korean_spaces(buf.rstrip(" :：-·") + " " + s); 
+                    buf = tidy_korean_spaces(buf.rstrip(" :：-·") + " " + s)
                     continue
                 if (len(buf) < 20 and not re.search(r"[.?!다]$", buf)) or (len(s) < 20 and not re.search(r"[.?!다]$", s)):
-                    buf = tidy_korean_spaces(buf + " " + s); 
+                    buf = tidy_korean_spaces(buf + " " + s)
                     continue
                 if not re.search(r"[.?!다]$", buf):
-                    buf = tidy_korean_spaces(buf + " " + s); 
+                    buf = tidy_korean_spaces(buf + " " + s)
                     continue
                 out.append(buf); buf = s
             else:
@@ -254,15 +275,14 @@ def combine_date_with_next(lines: List[str]) -> List[str]:
         if re.search(DATE_PAT, cur) and (i+1) < len(lines):
             nxt_raw = lines[i+1]
             nxt = strip_noise_line(nxt_raw)
-            # 다음 줄: 사고 키워드 + (예방/체크표/장문 아님) 일 때만 결합
-            is_acc = bool(re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", nxt))
+            is_acc = bool(re.search(ACCIDENT_PAT, nxt))
             looks_prev = bool(re.search(PREV_HINT, nxt)) or bool(re.search(BUL_MARK, nxt_raw)) or len(nxt) > 120
             if is_acc and not looks_prev:
                 m = re.search(DATE_PAT, cur)
                 y, mo, d = m.groups()
                 y = int(str(y).replace("’","").replace("'","")); y = 2000 + y if y < 100 else y
                 out.append(f"{int(y)}년 {int(mo)}월 {int(d)}일, {nxt}")
-                i += 2; 
+                i += 2
                 continue
         out.append(cur); i += 1
     return out
@@ -312,11 +332,18 @@ def preprocess_text_to_sentences(text: str) -> List[str]:
     return sents
 
 # -------------------- (1) 헤더 기반 섹션 파서 --------------------
-SECTION_HEADERS_CASE = [r"주요\s*사고사례", r"사고사례", r"사고\s*사례"]
+SECTION_HEADERS_CASE = [
+    r"주요\s*사고사례", r"사고사례", r"사고\s*사례",
+    # ★ 별칭 추가
+    r"사고\s*개요", r"주요\s*사고\s*개요", r"주요\s*사고\s*개요\s*/?\s*사례"
+]
 SECTION_HEADERS_PREV = [
     r"안전\s*작업방법", r"밀폐공간\s*작업\s*시", r"밀폐공간작업\s*시",
     r"위험물질\s*취급\s*시", r"예방\s*수칙", r"실천\s*수칙", r"예방\s*조치",
-    r"안전\s*수칙", r"작업\s*수칙"
+    r"안전\s*수칙", r"작업\s*수칙",
+    # ★ 별칭 추가
+    r"안전\s*대책", r"예방\s*대책", r"핵심\s*수칙", r"10대\s*안전\s*수칙",
+    r"현장\s*안전\s*수칙", r"안전\s*작업\s*요령"
 ]
 def _compile_headers(headers: List[str]) -> List[re.Pattern]:
     return [re.compile(h, re.IGNORECASE) for h in headers]
@@ -354,7 +381,6 @@ def extract_section_bullets(text: str, which: str = "case") -> List[str]:
             clean = strip_noise_line(raw)
             if not clean:
                 continue
-            # 체크표 한 줄 내 다중 항목 분해
             for ck in split_inline_check_bullets(clean):
                 if ck: items.append(ck)
     merged = merge_broken_lines(items)
@@ -364,7 +390,9 @@ def extract_section_bullets(text: str, which: str = "case") -> List[str]:
 ACTION_VERBS = [
     "설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고",
     "교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수",
-    "운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정"
+    "운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정",
+    # ★ 보강 동사
+    "부착","연결","해제","정지","교정","표준화","대피","보관","운반","해체","정착","부설"
 ]
 ACTION_PAT = (
     r"(?P<obj>[가-힣a-zA-Z0-9·\(\)\[\]\/\-\s]{2,}?)\s*(?P<verb>" + "|".join(ACTION_VERBS) + r"|실시|운영|관리)\b"
@@ -377,7 +405,6 @@ def cluster_bullets(text: str) -> List[List[str]]:
     cur: List[str] = []
     for ln in lines:
         if _is_bullet(ln):
-            # 체크표 내장 분해
             for ck in split_inline_check_bullets(ln):
                 ck2 = strip_noise_line(ck)
                 if ck2: cur.append(ck2)
@@ -395,7 +422,7 @@ def cluster_bullets(text: str) -> List[List[str]]:
     return cleaned
 
 def looks_case(s: str) -> bool:
-    return bool(re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
+    return bool(re.search(ACCIDENT_PAT, s))
 
 def looks_action(s: str) -> bool:
     return bool(re.search(ACTION_PAT, s) or re.search(PREV_HINT, s))
@@ -539,7 +566,8 @@ def soften(s: str) -> str:
     for pat in META_PATTERNS:
         s = re.sub(pat,"", s).strip()
     s = re.sub(BULLET_PREFIX,"", s).strip(" -•●\t")
-    return tidy_korean_spaces(s)
+    s = tidy_korean_spaces(s)
+    return s
 
 def is_meaningful_sentence(s: str) -> bool:
     raw = re.sub(r"\s+","", s)
@@ -548,8 +576,9 @@ def is_meaningful_sentence(s: str) -> bool:
     return True
 
 def is_accident_sentence(s: str) -> bool:
-    if any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법","허가","감시자","점검","차단","설치","준수","배치"]): return False
-    return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
+    if any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법","허가","감시자","점검","차단","설치","준수","배치"]):
+        return False
+    return bool(re.search(DATE_PAT, s) or re.search(ACCIDENT_PAT, s))
 
 def is_prevention_sentence(s: str) -> bool:
     return any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법"]) or bool(re.search(ACTION_PAT, s))
@@ -562,7 +591,6 @@ def to_action_sentence(s: str, base_text: str) -> str:
     s2 = re.sub(r"(위기탈출\s*안전보건)", "", s2).strip()
     s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
     s2 = re.sub(r"\s*에\s*따라\s*", " 시 ", s2)
-    # ‘제거 및 차단’ → ‘제거하고 차단’ (조사 중복 방지)
     s2 = re.sub(
         r"(?P<obj>[\w가-힣·\(\)\[\]\/\- ]{2,})\s*제거\s*및\s*차단",
         lambda m: add_obj_particle(m.group('obj').strip()) + " 제거하고 차단",
@@ -578,20 +606,19 @@ def to_action_sentence(s: str, base_text: str) -> str:
     if not m:
         nounish = re.sub(r"(의|에|에서|을|를|와|과|및)$","", s2).strip()
         if nounish and len(nounish) >= 4:
-            guess_verb = "설치" if any(k in nounish for k in ["난간","방호망","발판","방호장치","장비","장치","표지"]) else "확인"
+            guess_verb = "설치" if any(k in nounish for k in ["난간","방호망","발판","방호장치","장비","장치","표지","누전차단기","보호망","커버"]) else "확인"
             obj = add_obj_particle(nounish)
             return tidy_korean_spaces(f"{obj} {guess_verb} 합니다.")
         txt = s2 if s2.endswith(("니다.","합니다.","다.")) else (s2.rstrip(" .") + " 합니다.")
         return tidy_korean_spaces(txt)
     obj = (m.group("obj") or m.group("obj2") or "").strip()
     verb = (m.group("verb") or m.group("verb2") or "실시").strip()
-    # 이미 조사 있거나 '…및'으로 끝나면 추가 부착 금지
     if obj and not re.search(r"(을|를)$", obj) and not obj.endswith("및"):
         obj = add_obj_particle(obj)
-    prefix = "반드시 " if "설치" in verb else ("작업 전 " if verb in ("확인","점검","측정","기록","작성","지정") else "")
+    prefix = "반드시 " if "설치" in verb else ("작업 전 " if verb in ("확인","점검","측정","기록","작성","지정","연결","해제") else "")
     core = tidy_korean_spaces(f"{prefix}{obj} {verb}")
-    # 최종 방어: ‘하고를’ 같은 비문 교정
     core = re.sub(r"하고를\s+차단", "하고 차단", core)
+    core = re.sub(r"\s+(를|을)\s+(를|을)\s+", " 를 ", core)
     if re.fullmatch(r"(반드시 |작업 전 )?\s*(을|를)\s*(실시|관리|운영)\s*$", core):
         if obj.strip():
             core = tidy_korean_spaces(f"{prefix}{obj} 실시")
@@ -605,14 +632,14 @@ def repair_action_fragments(lines: List[str]) -> List[str]:
     while i < len(lines):
         cur = soften(lines[i])
         cur_no_sp = re.sub(r"\s+","", cur)
-        has_verb = bool(re.search(ACTION_PAT, cur)) or any(v in cur for v in ["합니다","한다","실시","설치","착용","점검","확인","배치","가동"])
+        has_verb = bool(re.search(ACTION_PAT, cur)) or any(v in cur for v in ["합니다","한다","실시","설치","착용","점검","확인","배치","가동","연결","해제","정지"])
         if (len(cur_no_sp) < 20) and (not has_verb):
             merged = cur
             j = i + 1
             while j < len(lines):
                 nxt = soften(lines[j])
                 merged = tidy_korean_spaces(merged + " " + nxt)
-                if re.search(ACTION_PAT, merged) or any(v in merged for v in ["합니다","한다","실시","설치","착용","점검","확인","배치","가동"]):
+                if re.search(ACTION_PAT, merged) or any(v in merged for v in ["합니다","한다","실시","설치","착용","점검","확인","배치","가동","연결","해제","정지"]):
                     break
                 j += 1
             out.append(merged); i = j + 1
@@ -651,9 +678,10 @@ def kb_ingest_text(text: str) -> None:
             st.session_state["kb_actions"].append(cand)
     for s in sents:
         if "?" in s or "확인" in s or "점검" in s:
-            q = soften(s if s.endswith("?") else s + " 맞습니까?")
-            if 2 <= len(q) <= 160:
-                st.session_state["kb_questions"].append(q)
+            if not re.search(r"(OPS|VR|공단)", s):
+                q = soften(s if s.endswith("?") else s + " 맞습니까?")
+                if 2 <= len(q) <= 160:
+                    st.session_state["kb_questions"].append(q)
 
 def kb_prune() -> None:
     def dedup_keep_order(lst: List[str]) -> List[str]:
@@ -674,6 +702,8 @@ def kb_match_candidates(cands: List[str], base_text: str, limit: int, min_sim: f
     commons = {"철저","작업방법","안전작업방법","허가","감시자","점검","설치","준수"} if st.session_state.get("profile_km") else set()
     for c in cands:
         if any(w in c for w in commons):
+            continue
+        if re.search(r"(OPS|VR|공단)", c):
             continue
         ct = set(tokens(c))
         cand_risks = {RISK_KEYWORDS.get(t, t) for t in ct if (t in RISK_KEYWORDS or t in RISK_KEYWORDS.values())}
@@ -703,7 +733,7 @@ def naturalize_case_sentence(s: str) -> str:
         s = s.replace(m.group(0), "").strip()
     s = s.strip(" ,.-")
     if not re.search(r"(다\.|입니다\.|했습니다\.)$", s):
-        if re.search(r"(사망|사상|중독|추락|낙하|붕괴|질식|끼임|깔림|부딪힘|감전|폭발)\s*$", s):
+        if re.search(ACCIDENT_PAT + r"\s*$", s):
             s = s.rstrip(" .") + "했습니다."
         elif re.search(r"(사건|사고)\s*$", s):
             s = s.rstrip(" .") + "가 발생했습니다."
@@ -746,8 +776,7 @@ def drop_label_token(t: str) -> bool:
         if re.match(pat, t): return True
     if t in {"소재","소재지","지역","장소","버스","영업소","업체","자료","키","메세지","명","안전보건"}:
         return True
-    # 키메세지 모드: 수식/메타 단어 추가 제외
-    if st.session_state.get("profile_km") and t in {"철저","작업방법","안전작업방법","허가","감시자","점검","설치","준수"}:
+    if st.session_state.get("profile_km") and t in {"철저","작업방법","안전작업방법","허가","감시자","설치","준수"}:
         return True
     return False
 
@@ -767,7 +796,7 @@ def top_terms_for_label(text: str, k: int=3) -> List[str]:
     commons = {"안전","교육","작업","현장","예방","조치","확인","관리","점검","가이드","지침"}
     if st.session_state.get("profile_km"):
         commons |= {"철저","작업방법","안전작업방법","허가","감시자","설치","준수"}
-    action_set = set(["설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고","교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정","실시"])
+    action_set = set(["설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고","교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정","실시","연결","해제","정지","부착"])
     cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons and t not in action_set and len(t) >= 2]
     if not cand: cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons]
     cand.sort(key=lambda x: x[1], reverse=True)
@@ -819,7 +848,8 @@ def make_structured_script(text: str, max_points: int=6) -> str:
         if is_accident_sentence(s): case_aux.append(naturalize_case_sentence(s))
         elif is_risk_sentence(s):   risk_aux.append(soften(s))
         elif ("?" in s or "확인" in s or "점검" in s):
-            ask_aux.append(soften(s if s.endswith("?") else s + " 맞습니까?"))
+            if not re.search(r"(OPS|VR|공단)", s):
+                ask_aux.append(soften(s if s.endswith("?") else s + " 맞습니까?"))
 
     act_aux = [to_action_sentence(s, text) for s in core_actions if is_meaningful_sentence(s)]
 
@@ -951,14 +981,13 @@ with st.sidebar:
 4) TextRank + MMR 요약 (**세션 KB 가중 TF-IDF**)  
 5) 규칙형 NLG: 조사·띄어쓰기·종결 보정, **예방 수칙 줄결합/자연화**  
 6) 결과 포맷: **자연스러운 교육대본** / **핵심요약**  
-*NEW: 섹션 파서 + 클러스터 + Fallback으로 사례/예방을 자동 수집합니다.*
+*NEW: 문장 내부 홍보 꼬리 제거, 행동동사 보강(연결/해제/정지 등), 섹션 헤더 별칭 추가.*
 """)
     st.session_state["domain_toggle"] = st.toggle(
         "🔧 도메인 템플릿 강화(신중 적용)",
         value=False,
         help="문장·본문 트리거 일치 + 유사도 기준 충족 시에만 템플릿을 소극적으로 적용합니다."
     )
-    # 키 메세지(OPS) 전용 강건 파싱 토글 (UI 최소 변경)
     st.session_state["profile_km"] = st.toggle(
         "🧾 키 메세지 모드(강건 파싱)",
         value=True,
