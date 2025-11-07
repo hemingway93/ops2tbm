@@ -1,6 +1,6 @@
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
-# v2025-11-07-c (키메세지 전처리 보강: 내부 홍보꼬리 제거 + 행동동사 확대 + 헤더 별칭 추가)
+# v2025-11-08-a (키메세지 전처리 보강 2: 더미문구/숏츠/그림파일 꼬리 제거, 사례 결합 조건 보수, 조사/중복 보정)
 #
 # [제출용 기술 주석: 구현 & 스택]
 # - 구현 형태: Web App (Streamlit) — 단일 파일 app.py, 서버/로컬 어디서든 실행 가능
@@ -81,7 +81,7 @@ SEED_ACTIONS = [
     "작업 전 작업계획서 작성 및 작업지휘자 지정","개인보호구 착용(안전모·보호안경·안전화 등)",
     "화기작업 허가 및 안전점검","정비·청소·점검 시 기계 전원 차단",
     "밀폐공간 작업 시 산소·유해가스 농도 측정","위험물질 취급 시 MSDS 비치·게시 및 교육",
-    "위험물질 취급 시 불침투성 보호복·방독마스크 착착","환기 실시 및 감시인 배치"
+    "위험물질 취급 시 불침투성 보호복·방독마스크 착용","환기 실시 및 감시인 배치"
 ]
 SEED_QUESTIONS = [
     "작업 전 작업계획서와 위험성평가를 검토했습니까?",
@@ -104,7 +104,7 @@ def _init_once():
     ss.setdefault("kb_actions", [])
     ss.setdefault("kb_questions", [])
     ss.setdefault("domain_toggle", False)
-    ss.setdefault("profile_km", True)   # 키메세지 모드 기본 ON
+    ss.setdefault("profile_km", True)
     ss.setdefault("seed_loaded", False)
     ss.setdefault("last_file_diag", {})
     ss.setdefault("last_extracted_cache", "")
@@ -123,38 +123,44 @@ def add_obj_particle(noun: str) -> str:
     return f"{noun}{'을' if _has_final_consonant(noun[-1]) else '를'}"
 
 TERM_FIXES = [
-    (r"\b감\s*전\b","감전"),
-    (r"\b누전\s*차단기\b","누전차단기"),
-    (r"\b절연\s*용\s*보호구\b","절연용 보호구"),
-    (r"\b전\s*기\s*설\s*비\b","전기설비"),
-    (r"\b보\s*호\s*구\b","보호구"),
+    (r"\\b감\\s*전\\b","감전"),
+    (r"\\b누전\\s*차단기\\b","누전차단기"),
+    (r"\\b절연\\s*용\\s*보호구\\b","절연용 보호구"),
+    (r"\\b전\\s*기\\s*설\\*비\\b","전기설비"),
+    (r"\\b보\\s*호\\s*구\\b","보호구"),
 ]
 
 def tidy_korean_spaces(s: str) -> str:
-    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\\s+", " ", s)
     for pat, rep in TERM_FIXES:
         s = re.sub(pat, rep, s)
     s = s.replace("전충분한","전 충분한").replace("전충분히","전 충분히")
-    s = re.sub(r"\s([,.])", r"\1", s)
+    s = re.sub(r"\\s([,.])", r"\\1", s)
+    s = re.sub(r"(작업\\s*전\\s*){2,}", "작업 전 ", s)
+    s = re.sub(r"(반드시\\s*){2,}", "반드시 ", s)
     return s.strip()
 
 # -------------------- 전처리 파이프라인 --------------------
 NOISE_PATTERNS = [
-    r"^제?\s?\d{4}\s?[-.]?\s?\d+\s?호$",
-    r"^(동절기\s*주요사고|안전작업방법|콘텐츠\s*링크|책자\s*OPS|숏폼\s*OPS)$",
+    r"^제?\\s?\\d{4}\\s?[-.]?\\s?\\d+\\s?호$",
+    r"^(동절기\\s*주요사고|안전작업방법|콘텐츠\\s*링크|책자\\s*OPS|숏폼\\s*OPS)$",
     r"^(포스터|책자|스티커|콘텐츠 링크)$",
-    r"^(스마트폰\s*APP|중대재해\s*사이렌|산업안전포털|고용노동부)$",
-    r"^https?://\S+$", r"^\(?\s*PowerPoint\s*프레젠테이션\s*\)?$",
-    r"^안전보건자료실.*$", r"^배포처\s+.*$", r"^홈페이지\s+.*$",
-    r"^VR\s+.*$", r"^리플릿\s+.*$", r"^동영상\s+.*$", r"^APP\s+.*$",
-    r".*검색해\s*보세요.*$",
+    r"^(스마트폰\\s*APP|중대재해\\s*사이렌|산업안전포털|고용노동부)$",
+    r"^https?://\\S+$", r"^\\(?\\s*PowerPoint\\s*프레젠테이션\\s*\\)?$",
+    r"^안전보건자료실.*$", r"^배포처\\s+.*$", r"^홈페이지\\s+.*$",
+    r"^VR\\s+.*$", r"^리플릿\\s+.*$", r"^동영상\\s+.*$", r"^APP\\s+.*$",
+    r".*검색해\\s*보세요.*$",
+    r"텍스트(\\s+텍스트){1,}.*$",
+    r"숏츠.*$",
+    r"그림파일\\s*클릭.*다운로드.*$",
+    r"콘텐츠\\s*>.*$",
+    r"^\\s*\\d+\\.\\s*$",
 ]
-# 인라인 체크표(/✓/✔) 포함 불릿
-BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
-DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
+BULLET_PREFIX = r"^[\\s\\-\\•\\●\\▪\\▶\\▷\\·\\*\\u25CF\\u25A0\\u25B6\\u25C6\\u2022\\u00B7\\u279C\\u27A4\\u25BA\\u25AA\\u25AB\\u2611\\u2713\\u2714\\u2716\\u2794\\u27A2\\u2717\\u25FB\\u25A1\\u25A3\\u25A2\\u2610\\u2612\\u25FE\\u25FD]+"
+DATE_PAT = r"([’']?\\d{2,4})\\.\\s?(\\d{1,2})\\.\\s?(\\d{1,2})\\.?"
 META_PATTERNS = [
-    r"<\s*\d+\s*명\s*사망\s*>", r"<\s*\d+\s*명\s*사상\s*>", r"<\s*\d+\s*명\s*의식불명\s*>",
-    r"<\s*사망\s*\d+\s*명\s*>", r"<\s*사상\s*\d+\s*>"
+    r"<\\s*\\d+\\s*명\\s*사망\\s*>", r"<\\s*\\d+\\s*명\\s*사상\\s*>", r"<\\s*\\d+\\s*명\\s*의식불명\\s*>",
+    r"<\\s*사망\\s*\\d+\\s*명\\s*>", r"<\\s*사상\\s*\\d+\\s*>"
 ]
 STOP_TERMS = set("""
 및 등 관련 사항 내용 예방 안전 작업 현장 교육 방법 기준 조치
@@ -164,19 +170,17 @@ STOP_TERMS = set("""
 소재 소재지 위치 장소 지역 시군구 서울 인천 부산 대구 대전 광주 울산 세종 경기도 충청 전라 경상 강원 제주
 명 건 호 호차 호수 페이지 쪽 부록 참고 그림 표 목차
 안전보건 ops 키 메세지 키메세지 자료 ops교안 교안
+텍스트 동영상 콘텐츠 숏츠 그림파일
 """.split())
 LABEL_DROP_PAT = [
-    r"^\d+$", r"^\d{2,4}[-_]\d{1,}$", r"^\d{4}$", r"^(제)?\d+호$", r"^(호|호수|호차)$",
-    r"^(사업장|업체|소재|소재지|장소|지역)$", r"^\d+\s*(명|건)$"
+    r"^\\d+$", r"^\\d{2,4}[-_]\\d{1,}$", r"^\\d{4}$", r"^(제)?\\d+호$", r"^(호|호수|호차)$",
+    r"^(사업장|업체|소재|소재지|장소|지역)$", r"^\\d+\\s*(명|건)$"
 ]
-# 예방 힌트/홍보 꼬리/체크표
 PREV_HINT = r"(예방|수칙|지침|안전조치|작업방법|허가|감시자|점검|차단|설치|준수|배치)"
 BUL_MARK = r"[✓✔]"
 PROMO_TAIL = r"(동영상|교안|포털|검색|사이렌|공단)$"
-# ★ 내부(문장 중간) 홍보 꼬리 제거용
-PROMO_MID = r"(‘?안전보건공단’?|산업안전보건공단|산업안전포털|안전보건포털|중대재해\s*사이렌|OPS|VR|동영상|교안|포털|검색)(?:\s*(보기|참조|검색|바로가기))?"
-
-ACCIDENT_PAT = r"(사망|사상|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)(\s*추정)?"
+PROMO_MID = r"(‘?안전보건공단’?|산업안전보건공단|산업안전포털|안전보건포털|중대재해\\s*사이렌|OPS|VR|동영상|교안|포털|검색|APP|애플리케이션)(?:\\s*(보기|참조|검색|바로가기))?"
+ACCIDENT_PAT = r"(사망|사상|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)(\\s*추정)?"
 
 RISK_KEYWORDS = dict(SEED_RISK_MAP)
 
@@ -184,18 +188,18 @@ def tokens(s: str) -> List[str]:
     return rxx.findall(r"[가-힣a-z0-9]{2,}", s.lower())
 
 def normalize_text(t: str) -> str:
-    t = t.replace("\x0c","\n")
-    t = re.sub(r"[ \t]+\n","\n", t)
-    t = re.sub(r"\n{3,}","\n\n", t)
+    t = t.replace("\\x0c","\\n")
+    t = re.sub(r"[ \\t]+\\n","\\n", t)
+    t = re.sub(r"\\n{3,}","\\n\\n", t)
     return t.strip()
 
 def strip_promo_inside(s: str) -> str:
-    # 문장 내부 삽입된 홍보 꼬리/기관명 블록을 안전하게 제거
-    s = re.sub(r"[‘'\"“”]?"+PROMO_MID+r"[’'\"“”]?", "", s)
-    # 괄호나 대시로 감싼 꼬리 제거
-    s = re.sub(r"[\(\[\{＜<]\s*"+PROMO_MID+r"\s*[\)\]\}＞>]", "", s)
-    # 쉼표 뒤에 오는 단독 꼬리 토막 제거
-    s = re.sub(r"(,\s*)?"+PROMO_MID+r"(\s*,)?", "", s)
+    s = re.sub(r"[‘'\\\"“”]?"+PROMO_MID+r"[’'\\\"“”]?", "", s)
+    s = re.sub(r"(스마트폰\\s*APP|애플리케이션)\\s*\\(\\s*\\)", "", s)
+    s = re.sub(r"(스마트폰\\s*APP|애플리케이션)", "", s)
+    s = re.sub(r"[\\(\\[\\{＜<]\\s*"+PROMO_MID+r"\\s*[\\)\\]\\}＞>]", "", s)
+    s = re.sub(r"(,\\s*)?"+PROMO_MID+r"(\\s*,)?", "", s)
+    s = re.sub(r"\\(\\s*\\)", "", s)
     return s
 
 def strip_noise_line(line: str) -> str:
@@ -205,31 +209,30 @@ def strip_noise_line(line: str) -> str:
     for pat in NOISE_PATTERNS:
         if re.search(pat, s, re.IGNORECASE):
             return ""
-    s = re.sub(r"https?://\S+","", s).strip()
-    # 문장 내부 홍보 꼬리 제거
+    s = re.sub(r"https?://\\S+","", s).strip()
     s = strip_promo_inside(s)
-    # 문장 끝 홍보 꼬리 제거
-    s = re.sub(r"(산업안전보건공단|안전보건공단|산업안전포털|안전보건포털)\s*$","", s).strip()
-    s = re.sub(r"(사고사례)\s*$","", s).strip()
+    s = re.sub(r"(산업안전보건공단|안전보건공단|산업안전포털|안전보건포털)\\s*$","", s).strip()
+    s = re.sub(r"(사고사례)\\s*$","", s).strip()
     s = s.strip("•●▪▶▷·-—–,")
-    s = re.sub(r"(안전작업방법|콘텐츠\s*링크|주요사고개요)$","", s).strip()
+    s = re.sub(r"(안전작업방법|콘텐츠\\s*링크|주요사고개요)$","", s).strip()
     s = re.sub(rf"{PROMO_TAIL}","", s).strip()
     s = tidy_korean_spaces(s)
     return s
 
 def _looks_like_heading(s: str) -> bool:
-    return bool(re.search(r"(방법|수칙|대책|안전조치|예방|작업방법|사고사례|주요\s*사고사례|사고개요)\s*[:：]?$", s))
+    return bool(re.search(r"(방법|수칙|대책|안전조치|예방|작업방법|사고사례|주요\\s*사고사례|사고개요)\\s*[:：]?$", s))
 
 def split_inline_check_bullets(s: str) -> List[str]:
     if not re.search(BUL_MARK, s):
         return [s]
-    parts = re.split(rf"{BUL_MARK}\s*", s)
+    parts = re.split(rf"{BUL_MARK}\\s*", s)
     out: List[str] = []
     for idx, p in enumerate(parts):
-        p = p.strip(" -•·\t")
+        p = p.strip(" -•·\\t")
         if not p: continue
-        # 앞머리에 붙은 '안전 작업방법'류 프리픽스 제거
-        p = re.sub(r"^(안전\s*작업\s*방법|안전작업방법)\s*", "", p)
+        p = re.sub(r"^(안전\\s*작업\\s*방법|안전작업방법)\\s*", "", p)
+        if re.search(r"텍스트(\\s+텍스트){1,}", p): 
+            continue
         if idx == 0 and len(parts) > 1:
             if len(p) < 120 and not re.search(PROMO_TAIL, p):
                 out.append(p)
@@ -275,9 +278,10 @@ def combine_date_with_next(lines: List[str]) -> List[str]:
         if re.search(DATE_PAT, cur) and (i+1) < len(lines):
             nxt_raw = lines[i+1]
             nxt = strip_noise_line(nxt_raw)
+            starts_acc_outline = bool(re.match(r"^사고\\s*개요", nxt))
             is_acc = bool(re.search(ACCIDENT_PAT, nxt))
-            looks_prev = bool(re.search(PREV_HINT, nxt)) or bool(re.search(BUL_MARK, nxt_raw)) or len(nxt) > 120
-            if is_acc and not looks_prev:
+            looks_prev = bool(re.search(PREV_HINT, nxt)) or bool(re.search(BUL_MARK, nxt_raw)) or len(nxt) > 220
+            if is_acc and not looks_prev and not starts_acc_outline:
                 m = re.search(DATE_PAT, cur)
                 y, mo, d = m.groups()
                 y = int(str(y).replace("’","").replace("'","")); y = 2000 + y if y < 100 else y
@@ -288,7 +292,7 @@ def combine_date_with_next(lines: List[str]) -> List[str]:
     return out
 
 CASE_JOIN_TRIG = ("쓰러지자","구조하던 중","차례로","이어","이후","동시에","결국","그 과정에서","외부에 있던","현장에 있던")
-CASE_KEYWORDS = ("사망","사상","중독","추락","붕괴","낙하","질식","끼임","깔림","부딪힘","감전","폭발","사고")
+CASE_KEYWORDS = ("사망","사상","중독","추락","붕괴","낙하","질식","끼임","깔림","부딪힘","감전","폭발","사고","사고개요")
 
 def stitch_case_blocks(sents: List[str]) -> List[str]:
     if not sents: return sents
@@ -298,7 +302,7 @@ def stitch_case_blocks(sents: List[str]) -> List[str]:
         while j < len(sents):
             nxt = sents[j].strip()
             cond_keyword = (any(k in cur for k in CASE_KEYWORDS) and any(k in nxt for k in CASE_KEYWORDS))
-            cond_prev_like = bool(re.search(PREV_HINT, nxt))
+            cond_prev_like = bool(re.search(PREV_HINT, nxt)) or nxt.startswith("사고 개요")
             if cond_keyword and not cond_prev_like:
                 sep = ", " if not merged.endswith(("다.","습니다.","했다.",".")) else " "
                 merged = tidy_korean_spaces(merged.rstrip(" .") + sep + nxt.lstrip(" ,"))
@@ -308,7 +312,7 @@ def stitch_case_blocks(sents: List[str]) -> List[str]:
         out.append(merged); i = j if merged_any else i + 1
     seen, dedup = set(), []
     for s in out:
-        k = re.sub(r"\s+","", s)
+        k = re.sub(r"\\s+","", s)
         if k not in seen:
             seen.add(k); dedup.append(s)
     return dedup
@@ -318,14 +322,14 @@ def preprocess_text_to_sentences(text: str) -> List[str]:
     raw_lines = [ln for ln in text.splitlines() if ln.strip()]
     lines = merge_broken_lines(raw_lines)
     lines = combine_date_with_next(lines)
-    joined = "\n".join(lines)
-    raw = rxx.split(r"(?<=[\.!\?]|다\.)\s+|\n+", joined)
+    joined = "\\n".join(lines)
+    raw = rxx.split(r"(?<=[\\.!\?]|다\\.)\\s+|\\n+", joined)
     sents = []
     for s in raw:
         s2 = strip_noise_line(s)
         if not s2: continue
         if re.search(r"(주요사고|안전작업방법|콘텐츠링크|주요 사고개요)$", s2): continue
-        if len(re.sub(r"\s+","", s2)) < 4:
+        if len(re.sub(r"\\s+","", s2)) < 4:
             continue
         sents.append(s2)
     sents = stitch_case_blocks(sents)
@@ -333,17 +337,15 @@ def preprocess_text_to_sentences(text: str) -> List[str]:
 
 # -------------------- (1) 헤더 기반 섹션 파서 --------------------
 SECTION_HEADERS_CASE = [
-    r"주요\s*사고사례", r"사고사례", r"사고\s*사례",
-    # ★ 별칭 추가
-    r"사고\s*개요", r"주요\s*사고\s*개요", r"주요\s*사고\s*개요\s*/?\s*사례"
+    r"주요\\s*사고사례", r"사고사례", r"사고\\s*사례",
+    r"사고\\s*개요", r"주요\\s*사고\\s*개요", r"주요\\s*사고\\s*개요\\s*/?\\s*사례"
 ]
 SECTION_HEADERS_PREV = [
-    r"안전\s*작업방법", r"밀폐공간\s*작업\s*시", r"밀폐공간작업\s*시",
-    r"위험물질\s*취급\s*시", r"예방\s*수칙", r"실천\s*수칙", r"예방\s*조치",
-    r"안전\s*수칙", r"작업\s*수칙",
-    # ★ 별칭 추가
-    r"안전\s*대책", r"예방\s*대책", r"핵심\s*수칙", r"10대\s*안전\s*수칙",
-    r"현장\s*안전\s*수칙", r"안전\s*작업\s*요령"
+    r"안전\\s*작업방법", r"밀폐공간\\s*작업\\s*시", r"밀폐공간작업\\s*시",
+    r"위험물질\\s*취급\\s*시", r"예방\\s*수칙", r"실천\\s*수칙", r"예방\\s*조치",
+    r"안전\\s*수칙", r"작업\\s*수칙",
+    r"안전\\s*대책", r"예방\\s*대책", r"핵심\\s*수칙", r"10대\\s*안전\\s*수칙",
+    r"현장\\s*안전\\s*수칙", r"안전\\s*작업\\s*요령"
 ]
 def _compile_headers(headers: List[str]) -> List[re.Pattern]:
     return [re.compile(h, re.IGNORECASE) for h in headers]
@@ -360,7 +362,7 @@ def _is_header(line: str, hdrs: List[re.Pattern]) -> bool:
     return any(h.search(s) for h in hdrs)
 
 def _is_bullet(line: str) -> bool:
-    return bool(re.match(BULLET_PREFIX, line.strip()) or re.match(r"^\s*[\-·•▶▷\*]\s+", line.strip()) or re.search(BUL_MARK, line))
+    return bool(re.match(BULLET_PREFIX, line.strip()) or re.match(r"^\\s*[\\-·•▶▷\\*]\\s+", line.strip()) or re.search(BUL_MARK, line))
 
 def extract_section_bullets(text: str, which: str = "case") -> List[str]:
     lines = split_keep_lines(text)
@@ -384,19 +386,18 @@ def extract_section_bullets(text: str, which: str = "case") -> List[str]:
             for ck in split_inline_check_bullets(clean):
                 if ck: items.append(ck)
     merged = merge_broken_lines(items)
-    return [x for x in merged if len(re.sub(r"\s+","", x)) >= 2]
+    return [x for x in merged if len(re.sub(r"\\s+","", x)) >= 2]
 
 # -------------------- (2) 헤더無 문서: 불릿 클러스터 + 자동 분류 --------------------
 ACTION_VERBS = [
     "설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고",
     "교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수",
     "운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정",
-    # ★ 보강 동사
     "부착","연결","해제","정지","교정","표준화","대피","보관","운반","해체","정착","부설"
 ]
 ACTION_PAT = (
-    r"(?P<obj>[가-힣a-zA-Z0-9·\(\)\[\]\/\-\s]{2,}?)\s*(?P<verb>" + "|".join(ACTION_VERBS) + r"|실시|운영|관리)\b"
-    r"|(?P<obj2>[가-힣a-zA-Z0-9·\(\)\[\]\/\-\s]{2,}?)\s*(을|를)\s*(?P<verb2>" + "|".join(ACTION_VERBS) + r"|실시|운영|관리)\b"
+    r"(?P<obj>[가-힣a-zA-Z0-9·\\(\\)\\[\\]\\/\\-\\s]{2,}?)\\s*(?P<verb>" + "|".join(ACTION_VERBS) + r"|실시|운영|관리)\\b"
+    r"|(?P<obj2>[가-힣a-zA-Z0-9·\\(\\)\\[\\]\\/\\-\\s]{2,}?)\\s*(을|를)\\s*(?P<verb2>" + "|".join(ACTION_VERBS) + r"|실시|운영|관리)\\b"
 )
 
 def cluster_bullets(text: str) -> List[List[str]]:
@@ -416,7 +417,7 @@ def cluster_bullets(text: str) -> List[List[str]]:
         clusters.append(merge_broken_lines(cur))
     cleaned = []
     for c in clusters:
-        c2 = [x for x in c if x and len(re.sub(r"\s+","", x)) >= 2]
+        c2 = [x for x in c if x and len(re.sub(r"\\s+","", x)) >= 2]
         if c2:
             cleaned.append(c2)
     return cleaned
@@ -562,17 +563,19 @@ def soften(s: str) -> str:
     s = s.replace("하여야","해야 합니다").replace("한다","합니다").replace("한다.","합니다.")
     s = s.replace("바랍니다","해주세요").replace("확인 바람","확인해주세요")
     s = s.replace("금지한다","금지합니다").replace("필요하다","필요합니다")
-    s = re.sub(r"^\(([^)]+)\)\s*","", s)
+    s = re.sub(r"^\\(([^)]+)\\)\\s*","", s)
     for pat in META_PATTERNS:
         s = re.sub(pat,"", s).strip()
-    s = re.sub(BULLET_PREFIX,"", s).strip(" -•●\t")
+    s = re.sub(BULLET_PREFIX,"", s).strip(" -•●\\t")
+    s = re.sub(r"\\(\\s*\\)", "", s)
+    s = re.sub(r"(스마트폰\\s*APP|애플리케이션)", "", s)
     s = tidy_korean_spaces(s)
     return s
 
 def is_meaningful_sentence(s: str) -> bool:
-    raw = re.sub(r"\s+","", s)
+    raw = re.sub(r"\\s+","", s)
     if len(raw) < 4: return False
-    if re.fullmatch(r"[가-힣\s]*합니다\.", s.strip()): return False
+    if re.fullmatch(r"[가-힣\\s]*합니다\\.", s.strip()): return False
     return True
 
 def is_accident_sentence(s: str) -> bool:
@@ -588,14 +591,14 @@ def is_risk_sentence(s: str) -> bool:
 
 def to_action_sentence(s: str, base_text: str) -> str:
     s2 = soften(s)
-    s2 = re.sub(r"(위기탈출\s*안전보건)", "", s2).strip()
-    s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
-    s2 = re.sub(r"\s*에\s*따라\s*", " 시 ", s2)
-    s2 = re.sub(
-        r"(?P<obj>[\w가-힣·\(\)\[\]\/\- ]{2,})\s*제거\s*및\s*차단",
-        lambda m: add_obj_particle(m.group('obj').strip()) + " 제거하고 차단",
-        s2
-    )
+    s2 = re.sub(r"(위기탈출\\s*안전보건)", "", s2).strip()
+    s2 = re.sub(r"\\s*에\\s*따른\\s*", " 시 ", s2)
+    s2 = re.sub(r"\\s*에\\s*따라\\s*", " 시 ", s2)
+    s2 = re.sub(r"(?P<obj>[\\w가-힣·\\(\\)\\[\\]\\/\\- ]{2,})\\s*제거\\s*및\\s*차단", lambda m: add_obj_particle(m.group('obj').strip()) + " 제거하고 차단", s2)
+    s2 = re.sub(r"작동을\\s*설치", "작동하도록", s2)
+    s2 = re.sub(r"\\b반드시를\\b", "반드시", s2)
+    s2 = re.sub(r"\\(\\s*\\)", "", s2)
+
     s2_tpl = _domain_template_apply(s2, base_text)
     if s2_tpl != s2:
         txt = s2_tpl
@@ -617,9 +620,11 @@ def to_action_sentence(s: str, base_text: str) -> str:
         obj = add_obj_particle(obj)
     prefix = "반드시 " if "설치" in verb else ("작업 전 " if verb in ("확인","점검","측정","기록","작성","지정","연결","해제") else "")
     core = tidy_korean_spaces(f"{prefix}{obj} {verb}")
-    core = re.sub(r"하고를\s+차단", "하고 차단", core)
-    core = re.sub(r"\s+(를|을)\s+(를|을)\s+", " 를 ", core)
-    if re.fullmatch(r"(반드시 |작업 전 )?\s*(을|를)\s*(실시|관리|운영)\s*$", core):
+    core = re.sub(r"하고를\\s+차단", "하고 차단", core)
+    core = re.sub(r"\\s+(를|을)\\s+(를|을)\\s+", " 를 ", core)
+    core = re.sub(r"(작업\\s*전\\s*){2,}", "작업 전 ", core)
+    core = re.sub(r"(반드시\\s*){2,}", "반드시 ", core)
+    if re.fullmatch(r"(반드시 |작업 전 )?\\s*(을|를)\\s*(실시|관리|운영)\\s*$", core):
         if obj.strip():
             core = tidy_korean_spaces(f"{prefix}{obj} 실시")
         else:
@@ -631,7 +636,7 @@ def repair_action_fragments(lines: List[str]) -> List[str]:
     i = 0
     while i < len(lines):
         cur = soften(lines[i])
-        cur_no_sp = re.sub(r"\s+","", cur)
+        cur_no_sp = re.sub(r"\\s+","", cur)
         has_verb = bool(re.search(ACTION_PAT, cur)) or any(v in cur for v in ["합니다","한다","실시","설치","착용","점검","확인","배치","가동","연결","해제","정지"])
         if (len(cur_no_sp) < 20) and (not has_verb):
             merged = cur
@@ -687,7 +692,7 @@ def kb_prune() -> None:
     def dedup_keep_order(lst: List[str]) -> List[str]:
         seen, out = set(), []
         for x in lst:
-            k = re.sub(r"\s+","", x)
+            k = re.sub(r"\\s+","", x)
             if k not in seen:
                 seen.add(k); out.append(x)
         return out
@@ -718,8 +723,8 @@ def kb_match_candidates(cands: List[str], base_text: str, limit: int, min_sim: f
 # -------------------- 사례/예방 자연화 보조 --------------------
 def naturalize_case_sentence(s: str) -> str:
     s = soften(s)
-    death = re.search(r"사망\s*(\d+)\s*명", s)
-    inj = re.search(r"사상\s*(\d+)\s*명", s)
+    death = re.search(r"사망\\s*(\\d+)\\s*명", s)
+    inj = re.search(r"사상\\s*(\\d+)\\s*명", s)
     unconscious = re.search(r"의식불명", s)
     info = []
     if death: info.append(f"근로자 {death.group(1)}명 사망")
@@ -732,10 +737,10 @@ def naturalize_case_sentence(s: str) -> str:
         date_txt = f"{int(y)}년 {int(mo)}월 {int(d)}일, "
         s = s.replace(m.group(0), "").strip()
     s = s.strip(" ,.-")
-    if not re.search(r"(다\.|입니다\.|했습니다\.)$", s):
-        if re.search(ACCIDENT_PAT + r"\s*$", s):
+    if not re.search(r"(다\\.|입니다\\.|했습니다\\.)$", s):
+        if re.search(ACCIDENT_PAT + r"\\s*$", s):
             s = s.rstrip(" .") + "했습니다."
-        elif re.search(r"(사건|사고)\s*$", s):
+        elif re.search(r"(사건|사고)\\s*$", s):
             s = s.rstrip(" .") + "가 발생했습니다."
         else:
             s = s.rstrip(" .") + " 사고가 발생했습니다."
@@ -751,7 +756,7 @@ def fallback_extract_cases(text: str, sents: List[str]) -> List[str]:
     pool = stitch_case_blocks(pool)
     seen, out = set(), []
     for x in pool:
-        k = re.sub(r"\s+","", x)
+        k = re.sub(r"\\s+","", x)
         if k not in seen:
             seen.add(k); out.append(x)
     return out[:6]
@@ -764,7 +769,7 @@ def fallback_extract_preventions(text: str, sents: List[str]) -> List[str]:
     norm = [to_action_sentence(x, text) for x in pool if is_meaningful_sentence(x)]
     seen, out = set(), []
     for x in norm:
-        k = re.sub(r"\s+","", x)
+        k = re.sub(r"\\s+","", x)
         if k not in seen:
             seen.add(k); out.append(x)
     return out[:12]
@@ -795,7 +800,7 @@ def top_terms_for_label(text: str, k: int=3) -> List[str]:
     if not doc_cnt: return ["안전보건","교육"]
     commons = {"안전","교육","작업","현장","예방","조치","확인","관리","점검","가이드","지침"}
     if st.session_state.get("profile_km"):
-        commons |= {"철저","작업방법","안전작업방법","허가","감시자","설치","준수"}
+        commons |= {"철저","작업방법","안전작업방법","허가","감시자","설치","준수","콘텐츠","동영상","숏츠","그림파일","텍스트"}
     action_set = set(["설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고","교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정","실시","연결","해제","정지","부착"])
     cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons and t not in action_set and len(t) >= 2]
     if not cand: cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons]
@@ -860,7 +865,7 @@ def make_structured_script(text: str, max_points: int=6) -> str:
     def uniq_keep(seq: List[str]) -> List[str]:
         seen, out = set(), []
         for x in seq:
-            k = re.sub(r"\s+","", x)
+            k = re.sub(r"\\s+","", x)
             if k not in seen:
                 seen.add(k); out.append(x)
         return out
@@ -871,9 +876,9 @@ def make_structured_script(text: str, max_points: int=6) -> str:
     acts   = uniq_keep(acts)
 
     lines = []
-    lines.append(f"🦺 TBM 교육대본 – {topic_label}\n")
+    lines.append(f"🦺 TBM 교육대본 – {topic_label}\\n")
     lines.append("◎ 도입")
-    lines.append(f"오늘은 최근 발생한 '{topic_label.replace(' 재해예방','')}' 사고 사례를 중심으로, 우리 현장에서 같은 사고를 예방하기 위한 안전조치를 함께 살펴보겠습니다.\n")
+    lines.append(f"오늘은 최근 발생한 '{topic_label.replace(' 재해예방','')}' 사고 사례를 중심으로, 우리 현장에서 같은 사고를 예방하기 위한 안전조치를 함께 살펴보겠습니다.\\n")
 
     if cases:
         lines.append("◎ 사고 사례")
@@ -899,11 +904,11 @@ def make_structured_script(text: str, max_points: int=6) -> str:
     lines.append("예방조치는 '선조치 후작업'이 원칙입니다. 오늘 작업 전, 각 공정별 위험요인을 다시 한 번 점검하고 필요한 보호구와 안전조치를 반드시 준비합시다.")
     lines.append("◎ 구호")
     lines.append("“한 번 더 확인! 한 번 더 점검!”")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 def make_concise_report(text: str, max_points: int=6) -> str:
     sents = ai_extract_summary_for_report(text, max_points)
-    sents = [soften(s) for s in sents if not re.match(r"(배포처|주소|홈페이지|VR|리플릿)", s)]
+    sents = [soften(s) for s in sents if not re.match(r"(배포처|주소|홈페이지|VR|리플릿|콘텐츠|동영상|숏츠)", s)]
     cases_blk = [naturalize_case_sentence(s) for s in extract_section_bullets(text, "case")] or \
                 [naturalize_case_sentence(s) for s in fallback_extract_cases(text, preprocess_text_to_sentences(text))]
     prev_blk  = [to_action_sentence(s, text) for s in repair_action_fragments(
@@ -919,7 +924,7 @@ def make_concise_report(text: str, max_points: int=6) -> str:
     def uniq_keep(seq: List[str]) -> List[str]:
         seen, out = set(), []
         for x in seq:
-            k = re.sub(r"\s+","", x)
+            k = re.sub(r"\\s+","", x)
             if k not in seen:
                 seen.add(k); out.append(x)
         return out
@@ -929,7 +934,7 @@ def make_concise_report(text: str, max_points: int=6) -> str:
     acts   = uniq_keep(prev_blk + acts)[:12]
 
     topic = dynamic_topic_label(text)
-    lines = [f"📄 핵심요약 — {topic}\n"]
+    lines = [f"📄 핵심요약 — {topic}\\n"]
     if cases:
         lines.append("【사고 개요】"); lines.append("자료에서 확인된 주요 사고는 다음과 같습니다.")
         for c in cases: lines.append(f"- {c}")
@@ -945,10 +950,10 @@ def make_concise_report(text: str, max_points: int=6) -> str:
     if not (cases or risks or acts):
         lines.append("자료의 핵심을 간단히 정리하면 다음과 같습니다.")
         for s in sents: lines.append(f"- {s}")
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 # -------------------- DOCX 내보내기 --------------------
-_XML_FORBIDDEN = r"[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]"
+_XML_FORBIDDEN = r"[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\uD800-\\uDFFF\\uFFFE\\uFFFF]"
 def _xml_safe(s: str) -> str:
     if not isinstance(s, str): s = "" if s is None else str(s)
     return rxx.sub(_XML_FORBIDDEN, "", s)
@@ -959,7 +964,7 @@ def to_docx_bytes(script: str) -> bytes:
         style = doc.styles["Normal"]; style.font.name = "Malgun Gothic"; style.font.size = Pt(11)
     except Exception:
         pass
-    for raw in script.split("\n"):
+    for raw in script.split("\\n"):
         line = _xml_safe(raw)
         p = doc.add_paragraph(line)
         for run in p.runs:
@@ -973,7 +978,7 @@ def to_docx_bytes(script: str) -> bytes:
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
     st.header("ℹ️ 소개 / 사용법")
-    st.markdown("""
+    st.markdown(\"\"\"
 **AI 파이프라인(LLM-Free, OpenSource Only)**  
 1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
 2) **사례 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
@@ -981,8 +986,8 @@ with st.sidebar:
 4) TextRank + MMR 요약 (**세션 KB 가중 TF-IDF**)  
 5) 규칙형 NLG: 조사·띄어쓰기·종결 보정, **예방 수칙 줄결합/자연화**  
 6) 결과 포맷: **자연스러운 교육대본** / **핵심요약**  
-*NEW: 문장 내부 홍보 꼬리 제거, 행동동사 보강(연결/해제/정지 등), 섹션 헤더 별칭 추가.*
-""")
+*NEW(11-08): 더미문구/숏츠/그림파일 꼬리 제거, “사고개요” 결합 금지, 조사·중복 보정 강화.*
+\"\"\")
     st.session_state["domain_toggle"] = st.toggle(
         "🔧 도메인 템플릿 강화(신중 적용)",
         value=False,
@@ -1014,7 +1019,7 @@ col_top1, col_top2 = st.columns([4,1])
 with col_top2:
     st.button("🧹 초기화", on_click=reset_all, use_container_width=True)
 
-st.markdown("**안내**  \n- 텍스트가 포함된 PDF 또는 본문 텍스트를 권장합니다.  \n- 이미지/스캔 PDF는 현재 OCR 미지원입니다.")
+st.markdown("**안내**  \\n- 텍스트가 포함된 PDF 또는 본문 텍스트를 권장합니다.  \\n- 이미지/스캔 PDF는 현재 OCR 미지원입니다.")
 
 col1, col2 = st.columns([1,1], gap="large")
 
@@ -1048,7 +1053,6 @@ with col1:
                         if name.lower().endswith(".pdf"):
                             data = zf.read(name); zip_pdfs[name] = data
                 if zip_pdfs:
-                    # ZIP 전체를 세션KB에 주입(경량 학습)
                     for nm, data in zip_pdfs.items():
                         txt_all = read_pdf_text_from_bytes(data, fname=f"{fname}::{nm}")
                         if txt_all.strip():
@@ -1143,5 +1147,4 @@ with col2:
                     use_container_width=True
                 )
 
-# 하단 안내 문구(“완전 무료” 표현 제거 → 사용된 AI 기법을 명시)
 st.caption("AI 기법: 전처리 + 불릿 클러스터링 + TextRank/MMR 요약 + 규칙형 NLG + 세션KB 가중 TF-IDF (LLM 미사용). 헤더 유무와 관계없이 사례/예방을 자동 추출합니다(섹션 파서·클러스터·Fallback).")
