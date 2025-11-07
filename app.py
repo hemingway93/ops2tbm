@@ -135,17 +135,11 @@ NOISE_PATTERNS = [
     r"^(동절기\s*주요사고|안전작업방법|콘텐츠\s*링크|책자\s*OPS|숏폼\s*OPS)$",
     r"^(포스터|책자|스티커|콘텐츠 링크)$",
     r"^(스마트폰\s*APP|중대재해\s*사이렌|산업안전포털|고용노동부)$",
-    r"^https?://\S+$",
-    r"^\(?\s*PowerPoint\s*프레젠테이션\s*\)?$",
-    r"^안전보건자료실.*$",
-    r"^배포처\s+.*$",
-    r"^홈페이지\s+.*$",
-    r"^VR\s+.*$",
-    r"^리플릿\s+.*$",
-    r"^동영상\s+.*$",
-    r"^APP\s+.*$",
+    r"^https?://\S+$", r"^\(?\s*PowerPoint\s*프레젠테이션\s*\)?$",
+    r"^안전보건자료실.*$", r"^배포처\s+.*$", r"^홈페이지\s+.*$",
+    r"^VR\s+.*$", r"^리플릿\s+.*$", r"^동영상\s+.*$", r"^APP\s+.*$",
     r".*검색해\s*보세요.*$",
-    # 추가 필터 (2025-교육혁신실-62 피드백 기반)
+    # 추가 필터 (현장 자료 헤더/링크/홍보문구)
     r"^동절기\s*안전보건\s*OPS$",
     r"^화재[·\.\s]*폭발\s*동영상$",
     r"^교량작업\s*교안$",
@@ -158,8 +152,7 @@ NOISE_PATTERNS = [
     r"^주요사고개요$",
     r"^PowerPoint\s*프레젠테이션$",
 ]
-
-BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2714\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
+BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
 DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
 META_PATTERNS = [
     r"<\s*\d+\s*명\s*사망\s*>", r"<\s*\d+\s*명\s*사상\s*>", r"<\s*\d+\s*명\s*의식불명\s*>",
@@ -198,7 +191,9 @@ def strip_noise_line(line: str) -> str:
         if re.match(pat, s, re.IGNORECASE):
             return ""
     s = re.sub(r"https?://\S+","", s).strip()
-    s = s.strip("•●▪▶▷·-—–")
+    s = s.strip("•●▪▶▷·-—–,")
+    s = re.sub(r"(안전작업방법|콘텐츠\s*링크|주요사고개요)$","", s).strip()
+    s = s.replace("작업전","작업 전").replace("허가철저","허가 철저").replace("비산방지조치","비산 방지조치")
     return s
 
 def _looks_like_heading(s: str) -> bool:
@@ -518,7 +513,6 @@ def is_meaningful_sentence(s: str) -> bool:
 def is_accident_sentence(s: str) -> bool:
     if any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법","허가","감시자","점검","차단","설치"]): return False
     return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
-    return bool(re.search(DATE_PAT, s) or re.search(r"(사망|사상|사고|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)", s))
 
 def is_prevention_sentence(s: str) -> bool:
     return any(w in s for w in ["예방","대책","지침","수칙","안전조치","작업방법"]) or bool(re.search(ACTION_PAT, s))
@@ -531,17 +525,20 @@ def to_action_sentence(s: str, base_text: str) -> str:
     s2 = re.sub(r"(위기탈출\s*안전보건)", "", s2).strip()
     s2 = re.sub(r"\s*에\s*따른\s*", " 시 ", s2)
     s2 = re.sub(r"\s*에\s*따라\s*", " 시 ", s2)
-    
-    s2 = re.sub(r"(?P<obj>[\\w가-힣·\\(\\)\\[\\]\\/\\- ]{2,})\\s*제거\\s*및\\s*차단", lambda m: add_obj_particle(m.group("obj").strip()) + " 제거하고 차단", s2)
-s2_tpl = _domain_template_apply(s2, base_text)
+    s2_tpl = _domain_template_apply(s2, base_text)
     if s2_tpl != s2:
         txt = s2_tpl
         if not txt.endswith(("다.","합니다.","습니다.")):
             txt = txt.rstrip(" .") + " 합니다."
         return tidy_korean_spaces(txt)
+    s2 = re.sub(
+        r"(?P<obj>[\w가-힣·\(\)\[\]\/\- ]{2,})\s*제거\s*및\s*차단",
+        lambda m: add_obj_particle(m.group('obj').strip()) + " 제거하고 차단",
+        s2
+    )
     m = re.search(ACTION_PAT, s2)
     if not m:
-        nounish = re.sub(r"(의|에|에서|을|를|와|과|및)$","", s2).strip()
+        nounish = re.sub(r"(의|에|에서|을|를|와|과|및)$", "", s2).strip()
         if nounish and len(nounish) >= 4:
             guess_verb = "설치" if any(k in nounish for k in ["난간","방호망","발판","방호장치","장비","장치","표지"]) else "확인"
             obj = add_obj_particle(nounish)
@@ -550,7 +547,7 @@ s2_tpl = _domain_template_apply(s2, base_text)
         return tidy_korean_spaces(txt)
     obj = (m.group("obj") or m.group("obj2") or "").strip()
     verb = (m.group("verb") or m.group("verb2") or "실시").strip()
-    if obj and not re.search(r"(을|를|에|에서|과|와|의)$", obj) and not obj.strip().endswith("및"):
+    if obj and not re.search(r"(을|를|에|에서|과|와|의)$", obj) and not obj.endswith("및"):
         obj = add_obj_particle(obj)
     prefix = "반드시 " if "설치" in verb else ("작업 전 " if verb in ("확인","점검","측정","기록","작성","지정") else "")
     core = tidy_korean_spaces(f"{prefix}{obj} {verb}")
@@ -722,8 +719,8 @@ def top_terms_for_label(text: str, k: int=3) -> List[str]:
     if not doc_cnt: return ["안전보건","교육"]
     commons = {"안전","교육","작업","현장","예방","조치","확인","관리","점검","가이드","지침"}
     action_set = set(["설치","배치","착용","점검","확인","측정","기록","표시","제공","비치","보고","신고","교육","주지","중지","통제","휴식","환기","차단","교대","배제","배려","가동","준수","운영","유지","교체","정비","청소","고정","격리","보호","보수","작성","지정","실시"])
-cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons and t not in action_set and len(t) >= 2]
-if not cand: cand = list(doc_cnt.items())
+    cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons and t not in action_set and len(t) >= 2]
+    if not cand: cand = [(t, doc_cnt[t]) for t in doc_cnt if t not in commons]
     cand.sort(key=lambda x: x[1], reverse=True)
     return [t for t,_ in cand[:k]]
 
@@ -1025,7 +1022,6 @@ with col1:
         st.caption(f"현재 텍스트 박스 길이: {len(st.session_state.get('edited_text',''))} chars")
 
 with col2:
-    # ⚠️ 사용자 요청에 따라 표시문구에서 “(무료)” 제거 (UI 레이아웃/흐름은 동일)
     gen_mode = st.selectbox("🧠 생성 모드", ["핵심요약","자연스러운 교육대본"])
     max_points = st.slider("요약 강도(핵심문장 개수)", 3, 10, 6)
 
