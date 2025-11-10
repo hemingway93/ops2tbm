@@ -983,17 +983,16 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-with st.sidebar:
-    # ---------- [공단 CI 로고 출력 — GitHub RAW + 로컬 Fallback] ----------
-    try:
-        RAW_CI = "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
-        LOCAL_CI = "/mnt/data/mark-image.gif"
-        ci_path = LOCAL_CI if Path(LOCAL_CI).exists() else RAW_CI
-        st.image(ci_path, use_column_width=True)
-    except Exception:
-        pass
-    st.header("ℹ️ 소개 / 사용법")
-    st.markdown("""
+# ---------- [공단 CI 로고 출력 — GitHub RAW + 로컬 Fallback] ----------
+try:
+    RAW_CI = "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
+    LOCAL_CI = "/mnt/data/mark-image.gif"
+    ci_path = LOCAL_CI if Path(LOCAL_CI).exists() else RAW_CI
+    st.image(ci_path, use_column_width=True)
+except Exception:
+    pass
+st.header("ℹ️ 소개 / 사용법")
+st.markdown("""
 **AI 파이프라인(LLM-Free, OpenSource Only)**  
 1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
 2) **사례 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
