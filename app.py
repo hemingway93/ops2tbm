@@ -983,6 +983,7 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
+    # sidebar block start (auto-fix)
 # ---------- [공단 CI 로고 출력 — GitHub RAW + 로컬 Fallback] ----------
 try:
     RAW_CI = "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
