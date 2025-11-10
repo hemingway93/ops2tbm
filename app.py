@@ -984,25 +984,26 @@ def to_docx_bytes(script: str) -> bytes:
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
     # sidebar block start (auto-fix)
-# ---------- [공단 CI 로고 출력 — GitHub RAW + 로컬 Fallback] ----------
-try:
-    RAW_CI = "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
-    LOCAL_CI = "/mnt/data/mark-image.gif"
-    ci_path = LOCAL_CI if Path(LOCAL_CI).exists() else RAW_CI
-    st.image(ci_path, use_column_width=True)
-except Exception:
+    # ---------- [공단 CI 로고 출력 — GitHub RAW + 로컬 Fallback] ----------
+    try:
+        RAW_CI = "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
+        LOCAL_CI = "/mnt/data/mark-image.gif"
+        ci_path = LOCAL_CI if Path(LOCAL_CI).exists() else RAW_CI
+        st.image(ci_path, use_column_width=True)
+    except Exception:
+        pass
     pass
-st.header("ℹ️ 소개 / 사용법")
-st.markdown("""
-**AI 파이프라인(LLM-Free, OpenSource Only)**  
-1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
-2) **사례 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
-3) **헤더 無여도** 불릿 클러스터 자동 분류(사례형/예방형)  
-4) TextRank + MMR 요약 (**세션 KB 가중 TF-IDF**)  
-5) 규칙형 NLG: 조사·띄어쓰기·종결 보정, **예방 수칙 줄결합/자연화**  
-6) 결과 포맷: **자연스러운 교육대본** / **핵심요약**  
-*NEW(11-08): 더미문구/숏츠/그림파일 꼬리 제거, “사고개요” 결합 금지, 조사·중복 보정 강화.*
-""")
+    st.header("ℹ️ 소개 / 사용법")
+    st.markdown("""
+    **AI 파이프라인(LLM-Free, OpenSource Only)**  
+    1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
+    2) **사례 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
+    3) **헤더 無여도** 불릿 클러스터 자동 분류(사례형/예방형)  
+    4) TextRank + MMR 요약 (**세션 KB 가중 TF-IDF**)  
+    5) 규칙형 NLG: 조사·띄어쓰기·종결 보정, **예방 수칙 줄결합/자연화**  
+    6) 결과 포맷: **자연스러운 교육대본** / **핵심요약**  
+    *NEW(11-08): 더미문구/숏츠/그림파일 꼬리 제거, “사고개요” 결합 금지, 조사·중복 보정 강화.*
+    """)
     st.session_state["domain_toggle"] = st.toggle(
         "🔧 도메인 템플릿 강화(신중 적용)",
         value=False,
