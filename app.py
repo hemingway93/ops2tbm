@@ -1,6 +1,6 @@
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
-# v2025-11-08-c (사이드바 문자열/들여쓰기 문법오류 수정)
+# v2025-11-08-b (사이드바 문자열/들여쓰기 문법오류 수정)
 #
 # [제출용 기술 주석: 구현 & 스택]
 # - 구현 형태: Web App (Streamlit) — 단일 파일 app.py, 서버/로컬 어디서든 실행 가능
@@ -44,6 +44,7 @@ import regex as rxx
 import streamlit as st
 from docx import Document
 from docx.shared import Pt
+from pathlib import Path
 
 # ---------- [PDF 텍스트 추출 계층 — pdfminer 우선 / pdfium 진단] ----------
 pdf_extract_text = None
@@ -982,13 +983,25 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-    st.image("/mnt/data/mark-image.gif", use_column_width=True)
-    st.header("사용 방법")
+with st.sidebar:
+    # ---------- [공단 CI 로고 출력 — GitHub RAW + 로컬 Fallback] ----------
+    try:
+        RAW_CI = "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
+        LOCAL_CI = "/mnt/data/mark-image.gif"
+        ci_path = LOCAL_CI if Path(LOCAL_CI).exists() else RAW_CI
+        st.image(ci_path, use_column_width=True)
+    except Exception:
+        pass
+    st.header("ℹ️ 소개 / 사용법")
     st.markdown("""
-1) PDF나 ZIP 파일을 올립니다.
-2) 자동으로 텍스트를 읽고 사례/예방을 구분해 요약합니다.
-3) 결과 형식을 선택해 생성하고, TXT/DOCX로 저장합니다.
-- 이미지(스캔) PDF는 OCR이 없어 정확도가 낮을 수 있습니다.
+**AI 파이프라인(LLM-Free, OpenSource Only)**  
+1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
+2) **사례 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
+3) **헤더 無여도** 불릿 클러스터 자동 분류(사례형/예방형)  
+4) TextRank + MMR 요약 (**세션 KB 가중 TF-IDF**)  
+5) 규칙형 NLG: 조사·띄어쓰기·종결 보정, **예방 수칙 줄결합/자연화**  
+6) 결과 포맷: **자연스러운 교육대본** / **핵심요약**  
+*NEW(11-08): 더미문구/숏츠/그림파일 꼬리 제거, “사고개요” 결합 금지, 조사·중복 보정 강화.*
 """)
     st.session_state["domain_toggle"] = st.toggle(
         "🔧 도메인 템플릿 강화(신중 적용)",
@@ -1002,8 +1015,7 @@ with st.sidebar:
     )
 
 seed_kb_once()
-st.title("포스터 한 장으로 말하기 대본 완성")
-st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
+st.title("🦺 OPS/포스터를 교육 대본으로 자동 변환")
 
 def reset_all():
     st.session_state.pop("manual_text", None)
@@ -1027,7 +1039,8 @@ st.markdown("**안내**  \n- 텍스트가 포함된 PDF 또는 본문 텍스트�
 col1, col2 = st.columns([1,1], gap="large")
 
 with col1:
-    uploaded = st.file_uploader("(폴더 아이콘)OPS/포스터 파일을 올려주세요",
+    uploaded = st.file_uploader(
+        "OPS 업로드 (PDF 또는 ZIP) • 텍스트 PDF 권장",
         type=["pdf","zip"],
         key=f"uploader_{st.session_state['uploader_key']}"
     )
@@ -1097,9 +1110,10 @@ with col1:
         st.session_state["last_extracted_cache"] = pasted
 
     base_text = st.session_state.get("edited_text","")
-    # (UI 숨김) 추출/입력 텍스트 미리보기는 화면에서 숨겼습니다.
-    edited_text = base_text
-with st.expander("🧪 파일 읽기 진단(Log-lite)", expanded=False):
+    st.markdown("**추출/입력 텍스트 미리보기**")
+    edited_text = st.text_area("텍스트", value=base_text, height=240, key="edited_text")
+
+    with st.expander("🧪 파일 읽기 진단(Log-lite)", expanded=False):
         diag = st.session_state.get("last_file_diag", {})
         if diag:
             st.write({
