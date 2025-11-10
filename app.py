@@ -995,11 +995,15 @@ with st.sidebar:
     pass
     st.header("🧭 사용 방법")
     st.markdown("""
-1) OPS/포스터 PDF 또는 ZIP 파일을 올립니다.
-2) 자동으로 텍스트를 읽고 사고사례/예방수칙을 구분합니다.
-3) 결과 형식을 선택해 생성하고, TXT/DOCX로 저장하세요.
-- 이미지(스캔) PDF는 OCR 미적용이라 정확도가 낮을 수 있습니다.
-""")
+    **AI 파이프라인(LLM-Free, OpenSource Only)**  
+    1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
+    2) **사례 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
+    3) **헤더 無여도** 불릿 클러스터 자동 분류(사례형/예방형)  
+    4) TextRank + MMR 요약 (**세션 KB 가중 TF-IDF**)  
+    5) 규칙형 NLG: 조사·띄어쓰기·종결 보정, **예방 수칙 줄결합/자연화**  
+    6) 결과 포맷: **자연스러운 교육대본** / **핵심요약**  
+    *NEW(11-08): 더미문구/숏츠/그림파일 꼬리 제거, “사고개요” 결합 금지, 조사·중복 보정 강화.*
+    """)
     st.session_state["domain_toggle"] = st.toggle(
         "🔧 도메인 템플릿 강화(신중 적용)",
         value=False,
@@ -1108,7 +1112,7 @@ with col1:
 
     base_text = st.session_state.get("edited_text","")
     # st.markdown("**추출/입력 텍스트 미리보기**")  # UI 숨김(기능 유지)
-    edited_text = # st.text_area("텍스트", value=base_text, height=240, key="edited_text")  # UI 숨김
+    edited_text = base_text  # UI 숨김(입력 위젯 미표시, 기존 값 사용)
 
     with st.expander("🧪 파일 읽기 진단(Log-lite)", expanded=False):
         diag = st.session_state.get("last_file_diag", {})
