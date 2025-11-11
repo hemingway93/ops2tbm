@@ -202,7 +202,11 @@ NOISE_PATTERNS = [
     r"그림파일\s*클릭.*다운로드.*$",
     r"콘텐츠\s*>.*$",
     r"^\s*\d+\.\s*$",
-]
+
+    r"리플릿.*설치\s*사이트",
+    r"위기탈출\s*안전보건",
+    r"교안\s*OPS",
+    r"관련\s*콘텐츠",]
 BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
 DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
 META_PATTERNS = [
@@ -275,6 +279,9 @@ def strip_noise_line(line: str) -> str:
     s = re.sub(r"(안전작업방법|콘텐츠\s*링크|주요사고개요)$","", s).strip()
     s = re.sub(rf"{PROMO_TAIL}","", s).strip()
     s = tidy_korean_spaces(s)
+    # 빈 따옴표 정리 및 공백 축약
+    s = re.sub(r"[‘’“”]\s*[‘’“”]", "", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
     return s
 
 def _looks_like_heading(s: str) -> bool:
@@ -1041,6 +1048,7 @@ def sanitize_for_txt(s: str) -> str:
     s = re.sub(r"[\u2600-\u27BF]", "", s)
     s = re.sub(r"[\U0001F000-\U0001FAFF]", "", s)
     s = re.sub(r"제\s*\d{4}\s*[-–]\s*\d+\s*호", "", s)
+    s = unicodedata.normalize("NFC", s)
     return s
 
 
