@@ -1129,8 +1129,7 @@ def reset_all():
     st.session_state["last_extracted_cache"] = ""
     st.session_state.pop("generated_script", None)
     st.session_state.pop("generated_subtitle", None)
-    st.rerun()
-
+    
 col_top1, col_top2 = st.columns([4,1])
 with col_top2:
     st.button("🧹 초기화", on_click=reset_all, use_container_width=True)
