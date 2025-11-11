@@ -1,18 +1,5 @@
 
-
-def _fix_linebreaks(s: str) -> str:
-    import re
-    # unify odd bullets to '-'
-    s = re.sub(r"[•]+", "-", s)
-    # ensure bullets and sections start on new lines
-    s = re.sub(r"\s*-\s*", "\n- ", s)
-    s = re.sub(r"\s*◎\s*", "\n\n◎ ", s)
-    # emoji numerals (1️⃣..9️⃣) on new lines
-    s = re.sub(r"(?<!\n)([0-9]️⃣)", "\n\1", s)
-    # collapse excessive spaces and newlines
-    s = re.sub(r"[ \t]{2,}", " ", s)
-    s = re.sub(r"\n{3,}", "\n\n", s)
-    return s
+st.markdown("""<style>\nh1 {font-size: 2.2rem !important;}\nh2 {font-size: 1.7rem !important;}\n</style>""", unsafe_allow_html=True)
 
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
@@ -1079,6 +1066,7 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
+    _show_ci_logo()
     st.markdown("""
 **사용법 (간단 안내)**  
 1) PDF 또는 ZIP을 올립니다.  
@@ -1117,7 +1105,7 @@ col_logo, col_title = st.columns([0.08, 0.92])
 with col_logo:
     st.image(logo_src, width=72)
 with col_title:
-    st.markdown("<div style='font-size:2.0rem;font-weight:700;line-height:1.1'>KOSHA OPS 포스터 한 장으로 말하기 대본 완성</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:2.0rem;font-weight:700;line-height:1.1'>포스터 한 장으로 말하기 대본 완성</div>", unsafe_allow_html=True)
     st.markdown("<div style='font-size:1.05rem;color:#666'>OPS/포스터 문서를 TBM교육으로 자동 변환합니다</div>", unsafe_allow_html=True)
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
@@ -1149,6 +1137,9 @@ def reset_all():
     st.session_state["seed_loaded"] = False
     st.session_state["last_file_diag"] = {}
     st.session_state["last_extracted_cache"] = ""
+    st.session_state["generated_script"] = ""
+    st.session_state["generated_subtitle"] = ""
+    st.session_state["edited_text"] = ""
     st.rerun()
 
 col_top1, col_top2 = st.columns([4,1])
@@ -1225,7 +1216,7 @@ with col1:
                 st.session_state["edited_text"] = extracted
                 st.session_state["last_extracted_cache"] = extracted
             else:
-                st.warning("⚠️ PDF에서 유효한 텍스트를 추출할 수 없습니다.")
+                st.warning("⚠️ PDF에서 유효한 텍스트를 추출할 수 없습니다."); st.session_state["edited_text"] = ""
         else:
             st.warning("지원하지 않는 형식입니다. PDF 또는 ZIP을 업로드하세요.")
 
@@ -1279,7 +1270,6 @@ with col2:
     if st.session_state.get("generated_script"):
         script = st.session_state.get("generated_script", "")
         subtitle = st.session_state.get("generated_subtitle", "")
-        script = _fix_linebreaks(script)
         st.text_area("결과 미리보기", value=script, height=420, key="result_preview")
         c3, c4 = st.columns(2)
         with c3:
