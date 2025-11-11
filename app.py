@@ -1019,47 +1019,24 @@ with st.sidebar:
     )
 
 seed_kb_once()
-st.title("🧩 포스터 한 장으로 말하기 대본 완성")
-st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
-def _show_ci_logo(width=96):
-    candidates = [
-        "/mount/src/ops2tbm/mark-image.gif",
-        "/mnt/data/mark-image.gif",
-        "mark-image.gif",
-    ]
-    for pth in candidates:
+def _show_ci_logo(width=128):
+    # Try GitHub RAW first (more reliable on Streamlit Cloud), then local files
+    try:
+        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
+        return
+    except Exception:
+        pass
+    import os as _os
+    for pth in ["/mount/src/ops2tbm/mark-image.gif", "/mnt/data/mark-image.gif", "mark-image.gif"]:
         try:
             if _os.path.exists(pth):
                 st.image(pth, width=width)
                 return
         except Exception:
             pass
-    try:
-        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
-    except Exception:
-        pass
-
-
-def reset_all():
-    st.session_state.pop("manual_text", None)
-    st.session_state.pop("edited_text", None)
-    st.session_state.pop("zip_choice", None)
-    st.session_state["kb_terms"] = Counter()
-    st.session_state["kb_actions"] = []
-    st.session_state["kb_questions"] = []
-    st.session_state["uploader_key"] += 1
-    st.session_state["seed_loaded"] = False
-    st.session_state["last_file_diag"] = {}
-    st.session_state["last_extracted_cache"] = ""
-    st.rerun()
-
-col_top1, col_top2 = st.columns([4,1])
-with col_top2:
-    st.button("🧹 초기화", on_click=reset_all, use_container_width=True)
-
 st.markdown("**안내**  \n- 텍스트가 포함된 PDF 또는 본문 텍스트를 권장합니다.  \n- 이미지/스캔 PDF는 현재 OCR 미지원입니다.")
 
 col1, col2 = st.columns([1,1], gap="large")
