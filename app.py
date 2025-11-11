@@ -1032,7 +1032,7 @@ def _show_ci_logo(width=120):
         try:
             if _os.path.exists(pth):
                 st.image(pth, width=width)
-                return
+# return statement removed (incorrect placement)
         except Exception:
             pass
     # Fallback: Raw URL if file is not found
@@ -1056,7 +1056,9 @@ with c_left:
 with c_logo:
     _show_ci_logo(width=120)  # Logo size adjustment (make bigger)
 
-# --- 중복 CI 로고 블록 제거 (제목 옆 1개만 유지) ---:
+# --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
+import os as _os
+def _show_ci_logo():
     candidates = [
         "/mount/src/ops2tbm/mark-image.gif",
         "/mnt/data/mark-image.gif",
@@ -1066,7 +1068,7 @@ with c_logo:
         try:
             if _os.path.exists(pth):
                 st.image(pth, use_column_width=True)
-                return
+# return statement removed (incorrect placement)
         except Exception:
             pass
     try:
