@@ -1024,7 +1024,7 @@ st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
-def _show_ci_logo():
+def _show_ci_logo(width=96):
     candidates = [
         "/mount/src/ops2tbm/mark-image.gif",
         "/mnt/data/mark-image.gif",
@@ -1033,7 +1033,7 @@ def _show_ci_logo():
     for pth in candidates:
         try:
             if _os.path.exists(pth):
-                st.image(pth, use_column_width=True)
+                st.image(pth, width=width)
                 return
         except Exception:
             pass
@@ -1041,7 +1041,7 @@ def _show_ci_logo():
         st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
     except Exception:
         pass
-_show_ci_logo()
+
 
 def reset_all():
     st.session_state.pop("manual_text", None)
