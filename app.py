@@ -164,16 +164,38 @@ def tidy_korean_spaces(s: str) -> str:
     s = re.sub(r"(작업\s*전\s*){2,}", "작업 전 ", s)
     s = re.sub(r"(반드시\s*){2,}", "반드시 ", s)
     return s.strip()
+def _finalize_sentence(s: str) -> str:
+    import re as _re
+    s = tidy_korean_spaces(s)
+    if _re.search(r"[.!?]$", s):
+        return s
+    return s + "."
+def _norm_text(s: str) -> str:
+    import re as _re
+    s = (s or "").strip()
+    s = _re.sub(r"\s+", " ", s)
+    return s
+
+
 
 # -------------------- 전처리 파이프라인 --------------------
 NOISE_PATTERNS = [
     r"^제?\s?\d{4}\s?[-.]?\s?\d+\s?호$",
+    r"^\[기준규칙\].*$",
+    r"다운로드\s*페이지로\s*이동",
+    r"스마트폰\s*APP",
     r"^(동절기\s*주요사고|안전작업방법|콘텐츠\s*링크|책자\s*OPS|숏폼\s*OPS)$",
     r"^(포스터|책자|스티커|콘텐츠 링크)$",
     r"^(스마트폰\s*APP|중대재해\s*사이렌|산업안전포털|고용노동부)$",
-    r"^https?://\S+$", r"^\(?\s*PowerPoint\s*프레젠테이션\s*\)?$",
-    r"^안전보건자료실.*$", r"^배포처\s+.*$", r"^홈페이지\s+.*$",
-    r"^VR\s+.*$", r"^리플릿\s+.*$", r"^동영상\s+.*$", r"^APP\s+.*$",
+    r"^https?://\S+$",
+    r"^\(?\s*PowerPoint\s*프레젠테이션\s*\)?$",
+    r"^안전보건자료실.*$",
+    r"^배포처\s+.*$",
+    r"^홈페이지\s+.*$",
+    r"^VR\s+.*$",
+    r"^리플릿\s+.*$",
+    r"^동영상\s+.*$",
+    r"^APP\s+.*$",
     r".*검색해\s*보세요.*$",
     r"텍스트(\s+텍스트){1,}.*$",
     r"숏츠.*$",
@@ -198,8 +220,15 @@ STOP_TERMS = set("""
 텍스트 동영상 콘텐츠 숏츠 그림파일
 """.split())
 LABEL_DROP_PAT = [
-    r"^\d+$", r"^\d{2,4}[-_]\d{1,}$", r"^\d{4}$", r"^(제)?\d+호$", r"^(호|호수|호차)$",
-    r"^(사업장|업체|소재|소재지|장소|지역)$", r"^\d+\s*(명|건)$"
+    r"^\d+$",
+    r"^\d{2,4}[-_]\d{1,}$",
+    r"^\d{4}$",
+    r"^(제)?\d+호$",
+    r"^(호|호수|호차)$",
+    r"^(사업장|업체|소재|소재지|장소|지역)$",
+    r"^\d+\s*(명|건)$",
+    r"^\d{4}\s*[-_]?[가-힣]+[-_]?\d+\s*호?$",
+    r"^제?\s*\d{4}\s*[-_]\s*\d+\s*호$",
 ]
 PREV_HINT = r"(예방|수칙|지침|안전조치|작업방법|허가|감시자|점검|차단|설치|준수|배치)"
 BUL_MARK = r"[✓✔]"
@@ -229,6 +258,10 @@ def strip_promo_inside(s: str) -> str:
 
 def strip_noise_line(line: str) -> str:
     s = (line or "").strip()
+    # 제거: 문장 내에 섞인 문서번호/제호 패턴
+    s = re.sub(r"제\s*\d{4}\s*[-–]\s*\d+\s*호", "", s)
+    s = re.sub(r"\b\d{4}\s*[-_]\s*[가-힣]{2,}\s*[-_]\s*\d+(?:\s*\d+\s*호)?\b", "", s)
+    s = s.strip()
     if not s: return ""
     s = re.sub(BULLET_PREFIX,"", s).strip()
     for pat in NOISE_PATTERNS:
@@ -912,7 +945,7 @@ def make_structured_script(text: str, max_points: int=6) -> str:
 
     if risks:
         lines.append("◎ 주요 위험요인")
-        for r in risks: lines.append(f"- {r}")
+        for r in risks: lines.append(f"- {_finalize_sentence(r)}")
         lines.append("")
 
     if acts:
@@ -982,6 +1015,34 @@ _XML_FORBIDDEN = r"[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]"
 def _xml_safe(s: str) -> str:
     if not isinstance(s, str): s = "" if s is None else str(s)
     return rxx.sub(_XML_FORBIDDEN, "", s)
+
+def sanitize_for_txt(s: str) -> str:
+    import re, unicodedata
+    s = unicodedata.normalize("NFKD", s)
+    circled_map = {
+        "①":"1)", "②":"2)", "③":"3)", "④":"4)", "⑤":"5)",
+        "⑥":"6)", "⑦":"7)", "⑧":"8)", "⑨":"9)", "⑩":"10)",
+        "❶":"1)", "❷":"2)", "❸":"3)", "❹":"4)", "❺":"5)",
+        "❻":"6)", "❼":"7)", "❽":"8)", "❾":"9)", "❿":"10)",
+        "⓪":"0)",
+    }
+    for k,v in circled_map.items():
+        s = s.replace(k, v)
+    replace_map = {
+        "🦺":"[TBM]", "📄":"", "✅":"-", "✔":"-", "✔️":"-",
+        "✖":"X", "✖️":"X", "❌":"X", "❎":"X",
+        "•":"-", "●":"-", "▪":"-", "◦":"-",
+        "▶":"-", "▷":"-", "▸":"-", "▹":"-",
+        "■":"-", "◆":"-", "◇":"-",
+    }
+    for k,v in replace_map.items():
+        s = s.replace(k, v)
+    s = s.replace("\u200d", "").replace("\ufe0e", "").replace("\ufe0f", "")
+    s = re.sub(r"[\u2600-\u27BF]", "", s)
+    s = re.sub(r"[\U0001F000-\U0001FAFF]", "", s)
+    s = re.sub(r"제\s*\d{4}\s*[-–]\s*\d+\s*호", "", s)
+    return s
+
 
 def to_docx_bytes(script: str) -> bytes:
     doc = Document()
@@ -1118,7 +1179,7 @@ with col1:
                     kb_prune()
                     first_name = sorted(zip_pdfs.keys())[0]
                     extracted = read_pdf_text_from_bytes(zip_pdfs[first_name], fname=first_name)
-                    if extracted.strip():
+                    if extracted.strip() and extracted.strip() != (st.session_state.get("edited_text","") or "").strip():
                         st.session_state["edited_text"] = extracted
                         st.session_state["last_extracted_cache"] = extracted
                     st.success(f"ZIP 감지: {len(zip_pdfs)}개 PDF, 첫 문서 자동 선택 → {_zip_display_name(first_name)}")
@@ -1134,15 +1195,16 @@ with col1:
                     for _nm in zip_pdfs.keys():
                         if _zip_display_name(_nm) == chosen:
                             real = _nm; break
+                    extracted2 = ""
                     if real and zip_pdfs.get(real):
                         extracted2 = read_pdf_text_from_bytes(zip_pdfs[real], fname=real)
-                    if extracted2.strip():
+                    if extracted2.strip() and extracted2.strip() != (st.session_state.get("edited_text","") or "").strip():
                         st.session_state["edited_text"] = extracted2
                         st.session_state["last_extracted_cache"] = extracted2
 
         elif fname.endswith(".pdf"):
             extracted = read_pdf_text_from_bytes(raw_bytes, fname=fname)
-            if extracted.strip():
+            if extracted.strip() and extracted.strip() != (st.session_state.get("edited_text","") or "").strip():
                 kb_ingest_text(extracted); kb_prune()
                 st.session_state["edited_text"] = extracted
                 st.session_state["last_extracted_cache"] = extracted
@@ -1152,7 +1214,7 @@ with col1:
             st.warning("지원하지 않는 형식입니다. PDF 또는 ZIP을 업로드하세요.")
 
     pasted = (manual_text or "").strip()
-    if pasted:
+    if pasted and pasted != (st.session_state.get("edited_text","") or ""):
         kb_ingest_text(pasted); kb_prune()
         st.session_state["edited_text"] = pasted
         st.session_state["last_extracted_cache"] = pasted
@@ -1205,7 +1267,7 @@ with col2:
         c3, c4 = st.columns(2)
         with c3:
             # Windows 메모장/한글 호환 위해 UTF-8 with BOM + CRLF
-            txt_bytes = _xml_safe(script).replace("\n", "\r\n").encode("utf-8-sig")
+            txt_bytes = sanitize_for_txt(_xml_safe(script)).replace("\n", "\r\n").encode("utf-8-sig")
             st.download_button(
                 "⬇️ TXT 다운로드",
                 data=txt_bytes,
