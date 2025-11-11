@@ -56,12 +56,10 @@ def _zip_display_name(name: str) -> str:
             return name
     except Exception:
         pass
-        pass
     for dec in ("cp949", "euc-kr", "utf-8"):
         try:
             return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
-    except Exception:
-        pass
+        except Exception:
             continue
     return name
 
@@ -70,20 +68,17 @@ pdf_extract_text = None
 try:
     from pdfminer_high_level import extract_text as _wrong  # 방지: 과거 오타 경로
     del _wrong
-    except Exception:
-        pass
+except Exception:
     pass
 try:
     from pdfminer.high_level import extract_text as _extract_text
     pdf_extract_text = _extract_text
-    except Exception:
-        pass
+except Exception:
     pdf_extract_text = None
 
 try:
     import pypdfium2 as pdfium
-    except Exception:
-        pass
+except Exception:
     pdfium = None
 
 # ---------- [Streamlit UI 설정 — 레이아웃 유지] ----------
@@ -482,7 +477,6 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
         else:
             t = ""
     except Exception:
-        pass
         t = ""
     t = normalize_text(t)
     if len(t.strip()) < 10 and pdfium is not None:
@@ -491,8 +485,7 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
                 _ = pdfium.PdfDocument(bio)
                 if t.strip() == "":
                     st.warning("⚠️ 이미지/스캔 PDF로 보입니다. 현재 OCR 미지원.")
-    except Exception:
-        pass
+        except Exception:
             pass
     st.session_state["last_file_diag"] = {
         "name": fname, "size_bytes": len(b), "extracted_chars": len(t),
@@ -994,15 +987,13 @@ def to_docx_bytes(script: str) -> bytes:
         style = doc.styles["Normal"]; style.font.name = "Malgun Gothic"; style.font.size = Pt(11)
     except Exception:
         pass
-        pass
     for raw in script.split("\n"):
         line = _xml_safe(raw)
         p = doc.add_paragraph(line)
         for run in p.runs:
             try:
                 run.font.name = "Malgun Gothic"; run.font.size = Pt(11)
-    except Exception:
-        pass
+            except Exception:
                 pass
     bio = io.BytesIO(); doc.save(bio); bio.seek(0)
     return bio.read()
@@ -1028,43 +1019,8 @@ with st.sidebar:
     )
 
 seed_kb_once()
-
-# --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
-import os as _os
-
-def _show_ci_logo(width=120):
-    candidates = [
-        "/mnt/data/mark-image.gif",  # local
-        "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
-    ]
-    for pth in candidates:
-        try:
-            if _os.path.exists(pth):
-                st.image(pth, width=width)
-                return
-    except Exception:
-        pass
-            pass
-    # Fallback: Raw URL if file is not found
-    st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
-
-# Title and logo (more space for logo)
-c_left, c_logo = st.columns([8, 2])  # More space for logo
-with c_left:
-    st.markdown(
-        "<div style='font-size:30px; font-weight:800; line-height:1.2;'>"
-        "포스터 한 장으로 말하기 대본 완성"
-        "</div>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        "<div style='font-size:20px; font-weight:600; margin-top:2px;'>"
-        "OPS/포스터 문서를 TBM교육으로 자동 변환합니다"
-        "</div>",
-        unsafe_allow_html=True
-    )
-with c_logo:
-    _show_ci_logo(width=120)  # Logo size adjustment (make bigger)
+st.title("🧩 포스터 한 장으로 말하기 대본 완성")
+st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
@@ -1077,15 +1033,13 @@ def _show_ci_logo():
     for pth in candidates:
         try:
             if _os.path.exists(pth):
-                
+                st.image(pth, use_column_width=True)
                 return
-    except Exception:
-        pass
+        except Exception:
             pass
     try:
-        
+        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
     except Exception:
-        pass
         pass
 _show_ci_logo()
 
@@ -1129,8 +1083,7 @@ with col1:
         fname = (uploaded.name or "").lower()
         try:
             raw_bytes = uploaded.getvalue()
-    except Exception:
-        pass
+        except Exception:
             raw_bytes = uploaded.read()
 
         if fname.endswith(".zip"):
