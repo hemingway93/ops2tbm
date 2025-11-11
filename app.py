@@ -1,5 +1,3 @@
-st.markdown("""<style>\nh1 {font-size: 2.2rem !important;}\nh2 {font-size: 1.7rem !important;}\n</style>""", unsafe_allow_html=True)
-
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
 # v2025-11-08-b (사이드바 문자열/들여쓰기 문법오류 수정)
@@ -1011,7 +1009,6 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-    _show_ci_logo()
     st.markdown("""
 **사용법 (간단 안내)**  
 1) PDF 또는 ZIP을 올립니다.  
@@ -1186,14 +1183,12 @@ with col2:
                     subtitle = "핵심요약"
             st.success(f"생성 완료! ({subtitle})")
             script = _clean_doc_ids(script)
-            script = _clean_doc_ids(script)
-            script = _fix_linebreaks(script)
             st.text_area("결과 미리보기", value=script, height=420)
             c3, c4 = st.columns(2)
             with c3:
                 st.download_button(
                     "⬇️ TXT 다운로드",
-                    data=("\ufeff" + _xml_safe(script).replace("\n","\r\n")).encode("utf-8"),
+                    data=_xml_safe(script).encode("utf-8"),
                     file_name="tbm_output.txt",
                     use_container_width=True
                 )
@@ -1213,6 +1208,7 @@ for _ in range(140):
     # 주석 패딩(기능 영향 없음): 라인 수 유지용
     pass
 
+_show_ci_logo()
 
 def _fix_linebreaks(s: str) -> str:
     import re
