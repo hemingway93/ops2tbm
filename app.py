@@ -1019,9 +1019,27 @@ with st.sidebar:
     )
 
 seed_kb_once()
-st.title("🧩 포스터 한 장으로 말하기 대본 완성")
-st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
+def _resolve_ci_logo():
+    import os as _os
+    for _p in [
+        "/mount/src/ops2tbm/mark-image.gif",
+        "/mnt/data/mark-image.gif",
+        "mark-image.gif",
+    ]:
+        try:
+            if _os.path.exists(_p):
+                return _p
+        except Exception:
+            pass
+    return "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
 
+logo_src = _resolve_ci_logo()
+col_logo, col_title = st.columns([0.12, 0.88])
+with col_logo:
+    st.image(logo_src, width=44)
+with col_title:
+    st.markdown("<div style='font-size:2.0rem;font-weight:700;line-height:1.1'>포스터 한 장으로 말하기 대본 완성</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:1.05rem;color:#666'>OPS/포스터 문서를 TBM교육으로 자동 변환합니다</div>", unsafe_allow_html=True)
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
 def _show_ci_logo():
@@ -1041,8 +1059,6 @@ def _show_ci_logo():
         st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
     except Exception:
         pass
-_show_ci_logo()
-
 def reset_all():
     st.session_state.pop("manual_text", None)
     st.session_state.pop("edited_text", None)
