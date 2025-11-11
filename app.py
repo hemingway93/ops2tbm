@@ -1028,7 +1028,7 @@ with st.sidebar:
     )
 
 seed_kb_once()
-st.title("🧩 포스터 한 장으로 말하기 대본 완성")
+st.title("📝 포스터 한 장으로 말하기 대본 완성")
 st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
@@ -1050,8 +1050,6 @@ def _show_ci_logo():
         st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=240)
     except Exception:
         pass
-_show_ci_logo()
-
 def reset_all():
     st.session_state.pop("manual_text", None)
     st.session_state.pop("edited_text", None)
@@ -1209,3 +1207,20 @@ st.caption("AI 기법: 전처리 + 불릿 클러스터링 + TextRank/MMR 요약 
 for _ in range(140):
     # 주석 패딩(기능 영향 없음): 라인 수 유지용
     pass
+
+_show_ci_logo()
+
+def _fix_linebreaks(s: str) -> str:
+    import re
+    # Normalize odd bullets to dash and ensure newline before bullets
+    s = re.sub(r"[•]+", "-", s)
+    s = re.sub(r"\s*-\s*", r"\n- ", s)  # bullets on new lines
+    # Ensure section markers start on their own line
+    s = re.sub(r"\s*◎\s*", r"\n\n◎ ", s)
+    # Ensure 1️⃣..9️⃣ start on new lines
+    s = re.sub(r"(?<!\n)([0-9]️⃣)", r"\n\1", s)
+    # Collapse multiple spaces
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    # Collapse triple newlines to double
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s
