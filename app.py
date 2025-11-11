@@ -1177,29 +1177,6 @@ with col2:
     max_points = st.slider("요약 강도(핵심문장 개수)", 3, 10, 6)
 
     if st.button("🛠️ 대본 생성", type="primary", use_container_width=True):
-    # --- 결과 프리뷰/다운로드(세션 유지) ---
-    if st.session_state.get("generated_script"):
-        script = st.session_state.get("generated_script", "")
-        subtitle = st.session_state.get("generated_subtitle", "")
-        st.text_area("결과 미리보기", value=script, height=420, key="result_preview")
-        c3, c4 = st.columns(2)
-        with c3:
-            # UTF-8 with BOM(utf-8-sig) + CRLF로 인코딩하여 메모장/한글에서 깨짐 방지
-            txt_bytes = _xml_safe(script).replace("\n", "\r\n").encode("utf-8-sig")
-            st.download_button(
-                "⬇️ TXT 다운로드",
-                data=txt_bytes,
-                file_name="tbm_output.txt",
-                use_container_width=True
-            )
-        with c4:
-            st.download_button(
-                "⬇️ DOCX 다운로드",
-                data=to_docx_bytes(script),
-                file_name="tbm_output.docx",
-                use_container_width=True
-            )
-
         text_for_gen = (st.session_state.get("edited_text") or "").strip()
         if not text_for_gen:
             text_for_gen = (st.session_state.get("last_extracted_cache") or "").strip()
@@ -1220,7 +1197,34 @@ with col2:
             st.success(f"생성 완료! ({subtitle})")
             st.rerun()
 
+                    use_container_width=True
+                )
+
 # 하단 안내 문구(“완전 무료” 표현 제거 → 사용된 AI 기법을 명시)
+
+# --- 결과 프리뷰/다운로드(세션 유지) ---
+if st.session_state.get("generated_script"):
+    script = st.session_state.get("generated_script", "")
+    subtitle = st.session_state.get("generated_subtitle", "")
+    st.text_area("결과 미리보기", value=script, height=420, key="result_preview")
+    c3, c4 = st.columns(2)
+    with c3:
+        # Windows 메모장/한글 호환 위해 UTF-8 with BOM + CRLF
+        txt_bytes = _xml_safe(script).replace("\n", "\r\n").encode("utf-8-sig")
+        st.download_button(
+            "⬇️ TXT 다운로드",
+            data=txt_bytes,
+            file_name="tbm_output.txt",
+            use_container_width=True
+        )
+    with c4:
+        st.download_button(
+            "⬇️ DOCX 다운로드",
+            data=to_docx_bytes(script),
+            file_name="tbm_output.docx",
+            use_container_width=True
+        )
+
 st.caption("AI 기법: 전처리 + 불릿 클러스터링 + TextRank/MMR 요약 + 규칙형 NLG + 세션KB 가중 TF-IDF (LLM 미사용). 헤더 유무와 관계없이 사례/예방을 자동 추출합니다(섹션 파서·클러스터·Fallback).")
 
 # ----- pad comment lines to keep file length ≥ 1000 (no functional impact) -----
