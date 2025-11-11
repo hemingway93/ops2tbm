@@ -1009,7 +1009,7 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-    _show_ci_logo()
+    __render_ci_logo()
     st.markdown("""
 **사용법 (간단 안내)**  
 1) PDF 또는 ZIP을 올립니다.  
@@ -1248,3 +1248,10 @@ def _fix_linebreaks(s: str) -> str:
     s = re.sub(r"[ \t]{2,}", " ", s)
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s
+
+def __render_ci_logo():
+    try:
+        _show_ci_logo()
+    except NameError:
+        pass
+
