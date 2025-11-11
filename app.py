@@ -131,8 +131,6 @@ def _init_once():
     ss.setdefault("seed_loaded", False)
     ss.setdefault("last_file_diag", {})
     ss.setdefault("last_extracted_cache", "")
-    ss.setdefault("generated_script", "")
-    ss.setdefault("generated_subtitle", "")
 _init_once()
 
 # -------------------- 한국어 조사/띄어쓰기 보정 --------------------
@@ -1021,27 +1019,9 @@ with st.sidebar:
     )
 
 seed_kb_once()
-def _resolve_ci_logo():
-    import os as _os
-    for _p in [
-        "/mount/src/ops2tbm/mark-image.gif",
-        "/mnt/data/mark-image.gif",
-        "mark-image.gif",
-    ]:
-        try:
-            if _os.path.exists(_p):
-                return _p
-        except Exception:
-            pass
-    return "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
+st.title("🧩 포스터 한 장으로 말하기 대본 완성")
+st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
-logo_src = _resolve_ci_logo()
-col_logo, col_title = st.columns([0.08, 0.92])
-with col_logo:
-    st.image(logo_src, width=72)
-with col_title:
-    st.markdown("<div style='font-size:2.0rem;font-weight:700;line-height:1.1'>포스터 한 장으로 말하기 대본 완성</div>", unsafe_allow_html=True)
-    st.markdown("<div style='font-size:1.05rem;color:#666'>OPS/포스터 문서를 TBM교육으로 자동 변환합니다</div>", unsafe_allow_html=True)
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
 def _show_ci_logo():
@@ -1061,6 +1041,8 @@ def _show_ci_logo():
         st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
     except Exception:
         pass
+_show_ci_logo()
+
 def reset_all():
     st.session_state.pop("manual_text", None)
     st.session_state.pop("edited_text", None)
@@ -1072,8 +1054,6 @@ def reset_all():
     st.session_state["seed_loaded"] = False
     st.session_state["last_file_diag"] = {}
     st.session_state["last_extracted_cache"] = ""
-    st.session_state.pop("generated_script", None)
-    st.session_state.pop("generated_subtitle", None)
     st.rerun()
 
 col_top1, col_top2 = st.columns([4,1])
@@ -1123,8 +1103,6 @@ with col1:
                     if extracted.strip():
                         st.session_state["edited_text"] = extracted
                         st.session_state["last_extracted_cache"] = extracted
-                        st.session_state.pop("generated_script", None)
-                        st.session_state.pop("generated_subtitle", None)
                     st.success(f"ZIP 감지: {len(zip_pdfs)}개 PDF, 첫 문서 자동 선택 → {_zip_display_name(first_name)}")
                 else:
                     st.error("ZIP 내에 PDF가 없습니다.")
@@ -1143,8 +1121,6 @@ with col1:
                     if extracted2.strip():
                         st.session_state["edited_text"] = extracted2
                         st.session_state["last_extracted_cache"] = extracted2
-                        st.session_state.pop("generated_script", None)
-                        st.session_state.pop("generated_subtitle", None)
 
         elif fname.endswith(".pdf"):
             extracted = read_pdf_text_from_bytes(raw_bytes, fname=fname)
@@ -1152,8 +1128,6 @@ with col1:
                 kb_ingest_text(extracted); kb_prune()
                 st.session_state["edited_text"] = extracted
                 st.session_state["last_extracted_cache"] = extracted
-                st.session_state.pop("generated_script", None)
-                st.session_state.pop("generated_subtitle", None)
             else:
                 st.warning("⚠️ PDF에서 유효한 텍스트를 추출할 수 없습니다.")
         else:
@@ -1164,8 +1138,6 @@ with col1:
         kb_ingest_text(pasted); kb_prune()
         st.session_state["edited_text"] = pasted
         st.session_state["last_extracted_cache"] = pasted
-        st.session_state.pop("generated_script", None)
-        st.session_state.pop("generated_subtitle", None)
 
     base_text = st.session_state.get("edited_text","")
     # # st.markdown("**추출/입력 텍스트 미리보기**")  # (hidden)  # UI 숨김(기능 유지)
@@ -1202,38 +1174,25 @@ with col2:
                 else:
                     script = make_concise_report(text_for_gen, max_points=max_points)
                     subtitle = "핵심요약"
-            st.session_state["generated_script"] = script
-            st.session_state["generated_subtitle"] = subtitle
             st.success(f"생성 완료! ({subtitle})")
-            st.rerun()
-
+            st.text_area("결과 미리보기", value=script, height=420)
+            c3, c4 = st.columns(2)
+            with c3:
+                st.download_button(
+                    "⬇️ TXT 다운로드",
+                    data=_xml_safe(script).encode("utf-8"),
+                    file_name="tbm_output.txt",
+                    use_container_width=True
+                )
+            with c4:
+                st.download_button(
+                    "⬇️ DOCX 다운로드",
+                    data=to_docx_bytes(script),
+                    file_name="tbm_output.docx",
+                    use_container_width=True
+                )
 
 # 하단 안내 문구(“완전 무료” 표현 제거 → 사용된 AI 기법을 명시)
-
-# --- 결과 프리뷰/다운로드(세션 유지) ---
-if st.session_state.get("generated_script"):
-    script = st.session_state.get("generated_script", "")
-    subtitle = st.session_state.get("generated_subtitle", "")
-    st.text_area("결과 미리보기", value=script, height=420, key="result_preview")
-    c3, c4 = st.columns(2)
-    with c3:
-        # Windows 메모장/한글 호환 위해 UTF-8 with BOM + CRLF
-        import unicodedata as _ud
-        txt_bytes = _ud.normalize("NFC", _xml_safe(script)).replace("\n", "\r\n").encode("utf-8-sig")
-        st.download_button(
-            "⬇️ TXT 다운로드",
-            data=txt_bytes,
-            file_name="tbm_output.txt",
-            use_container_width=True
-        )
-    with c4:
-        st.download_button(
-            "⬇️ DOCX 다운로드",
-            data=to_docx_bytes(script),
-            file_name="tbm_output.docx",
-            use_container_width=True
-        )
-
 st.caption("AI 기법: 전처리 + 불릿 클러스터링 + TextRank/MMR 요약 + 규칙형 NLG + 세션KB 가중 TF-IDF (LLM 미사용). 헤더 유무와 관계없이 사례/예방을 자동 추출합니다(섹션 파서·클러스터·Fallback).")
 
 # ----- pad comment lines to keep file length ≥ 1000 (no functional impact) -----
