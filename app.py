@@ -1056,9 +1056,7 @@ with c_left:
 with c_logo:
     _show_ci_logo(width=120)  # Logo size adjustment (make bigger)
 
-# --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
-import os as _os
-def _show_ci_logo():
+# --- 중복 CI 로고 블록 제거 (제목 옆 1개만 유지) ---:
     candidates = [
         "/mount/src/ops2tbm/mark-image.gif",
         "/mnt/data/mark-image.gif",
