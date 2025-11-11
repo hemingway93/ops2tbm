@@ -1,3 +1,33 @@
+
+
+def _clean_doc_ids(s: str) -> str:
+    import re
+    s = re.sub(r"\b제?\s*\d{4}\s*[-–—_.]?\s*\d+\s*호\b", "", s)
+    s = re.sub(r"[‘’“”']?\s*\d{4}\s*[-–—_/·]?\s*[가-힣A-Za-z]+(?:\s*[가-힣A-Za-z]+)*\s*[-–—_/·]?\s*\d+(?:\s*\d+)?\s*호\b", "", s)
+    s = re.sub(r"\b\d{4}\s*-\s*교육혁신실\s*-\s*", "", s)
+    s = re.sub(r"(다운로드\s*페이지|음원\s*\(국·?영문\)|원콜사업|스마트폰\s*텍스트)", "", s)
+    s = re.sub(r"\s*[,)…]*\s*호\b", " 호", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    return s
+
+
+def _show_ci_logo():
+    candidates = [
+        "/mount/src/ops2tbm/mark-image.gif",
+        "/mnt/data/mark-image.gif",
+        "mark-image.gif",
+    ]
+    for pth in candidates:
+        try:
+            if _os.path.exists(pth):
+                st.sidebar.image(pth, width=240)
+                return
+        except Exception:
+            pass
+    try:
+        st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=240)
+    except Exception:
+        pass
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
 # v2025-11-08-b (사이드바 문자열/들여쓰기 문법오류 수정)
@@ -43,12 +73,9 @@ import numpy as np
 import regex as rxx
 import streamlit as st
 def _clean_doc_ids(s: str) -> str:
-
     import re
     s = re.sub(r"\b제?\s*\d{4}\s*[-–—_.]?\s*\d+\s*호\b", "", s)
     s = re.sub(r"[‘’“”']?\s*\d{4}\s*[-–—_/·]?\s*[가-힣A-Za-z]+(?:\s*[가-힣A-Za-z]+)*\s*[-–—_/·]?\s*\d+(?:\s*\d+)?\s*호\b", "", s)
-    s = re.sub(r"\b\d{4}\s*-\s*교육혁신실\s*-\s*", "", s)
-    s = re.sub(r"(다운로드\s*페이지|음원\s*\(국·?영문\)|원콜사업|스마트폰\s*텍스트)", "", s)
     s = re.sub(r"\s*[,)…]*\s*호\b", " 호", s)
     s = re.sub(r"\s{2,}", " ", s).strip()
     return s
@@ -1012,25 +1039,7 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
- # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
-import os as _os
-def _show_ci_logo():
-    candidates = [
-        "/mount/src/ops2tbm/mark-image.gif",
-        "/mnt/data/mark-image.gif",
-        "mark-image.gif",
-    ]
-    for pth in candidates:
-        try:
-            if _os.path.exists(pth):
-                st.sidebar.image(pth, width=240)
-                return
-        except Exception:
-            pass
-    try:
-        st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=240)
-    except Exception:
-        pass
+    _show_ci_logo()
     st.markdown("""
 **사용법 (간단 안내)**  
 1) PDF 또는 ZIP을 올립니다.  
@@ -1053,6 +1062,8 @@ seed_kb_once()
 st.title("📝 포스터 한 장으로 말하기 대본 완성")
 st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
+# --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
+import os as _os
 
 def reset_all():
     st.session_state.pop("manual_text", None)
@@ -1194,7 +1205,7 @@ with col2:
             with c3:
                 st.download_button(
                     "⬇️ TXT 다운로드",
-                    data=("\ufeff" + _xml_safe(script).replace("\n","\r\n")).encode("utf-8"),
+                    data=_xml_safe(script).encode("utf-8"),
                     file_name="tbm_output.txt",
                     use_container_width=True
                 )
@@ -1213,8 +1224,6 @@ st.caption("AI 기법: 전처리 + 불릿 클러스터링 + TextRank/MMR 요약 
 for _ in range(140):
     # 주석 패딩(기능 영향 없음): 라인 수 유지용
     pass
-
-
 
 def _fix_linebreaks(s: str) -> str:
     import re
