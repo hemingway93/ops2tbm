@@ -54,12 +54,12 @@ def _zip_display_name(name: str) -> str:
     try:
         if re.search(r"[가-힣]", name):
             return name
-    except Exception:
+        except Exception:
         pass
     for dec in ("cp949", "euc-kr", "utf-8"):
         try:
             return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
-        except Exception:
+            except Exception:
             continue
     return name
 
@@ -68,17 +68,17 @@ pdf_extract_text = None
 try:
     from pdfminer_high_level import extract_text as _wrong  # 방지: 과거 오타 경로
     del _wrong
-except Exception:
+    except Exception:
     pass
 try:
     from pdfminer.high_level import extract_text as _extract_text
     pdf_extract_text = _extract_text
-except Exception:
+    except Exception:
     pdf_extract_text = None
 
 try:
     import pypdfium2 as pdfium
-except Exception:
+    except Exception:
     pdfium = None
 
 # ---------- [Streamlit UI 설정 — 레이아웃 유지] ----------
@@ -476,7 +476,7 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
                 t = pdf_extract_text(bio) or ""
         else:
             t = ""
-    except Exception:
+        except Exception:
         t = ""
     t = normalize_text(t)
     if len(t.strip()) < 10 and pdfium is not None:
@@ -485,7 +485,7 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
                 _ = pdfium.PdfDocument(bio)
                 if t.strip() == "":
                     st.warning("⚠️ 이미지/스캔 PDF로 보입니다. 현재 OCR 미지원.")
-        except Exception:
+            except Exception:
             pass
     st.session_state["last_file_diag"] = {
         "name": fname, "size_bytes": len(b), "extracted_chars": len(t),
@@ -985,7 +985,7 @@ def to_docx_bytes(script: str) -> bytes:
     doc = Document()
     try:
         style = doc.styles["Normal"]; style.font.name = "Malgun Gothic"; style.font.size = Pt(11)
-    except Exception:
+        except Exception:
         pass
     for raw in script.split("\n"):
         line = _xml_safe(raw)
@@ -993,7 +993,7 @@ def to_docx_bytes(script: str) -> bytes:
         for run in p.runs:
             try:
                 run.font.name = "Malgun Gothic"; run.font.size = Pt(11)
-            except Exception:
+                except Exception:
                 pass
     bio = io.BytesIO(); doc.save(bio); bio.seek(0)
     return bio.read()
@@ -1033,7 +1033,7 @@ def _show_ci_logo(width=120):
             if _os.path.exists(pth):
                 st.image(pth, width=width)
 # return statement removed (incorrect placement)
-        except Exception:
+            except Exception:
             pass
     # Fallback: Raw URL if file is not found
     st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
@@ -1069,11 +1069,11 @@ def _show_ci_logo():
             if _os.path.exists(pth):
                 
 # return statement removed (incorrect placement)
-        except Exception:
+            except Exception:
             pass
     try:
         
-    except Exception:
+        except Exception:
         pass
 _show_ci_logo()
 
@@ -1117,7 +1117,7 @@ with col1:
         fname = (uploaded.name or "").lower()
         try:
             raw_bytes = uploaded.getvalue()
-        except Exception:
+            except Exception:
             raw_bytes = uploaded.read()
 
         if fname.endswith(".zip"):
