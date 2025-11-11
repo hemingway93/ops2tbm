@@ -46,6 +46,23 @@ from docx import Document
 from docx.shared import Pt
 from pathlib import Path
 
+# -------------------- ZIP 한글 파일명 표시 보정 --------------------
+def _zip_display_name(name: str) -> str:
+    """Windows ZIP(cp949) -> Python cp437 decode mojibake: display fix only"""
+    if not isinstance(name, str):
+        return str(name)
+    try:
+        if re.search(r"[가-힣]", name):
+            return name
+    except Exception:
+        pass
+    for dec in ("cp949", "euc-kr", "utf-8"):
+        try:
+            return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
+        except Exception:
+            continue
+    return name
+
 # ---------- [PDF 텍스트 추출 계층 — pdfminer 우선 / pdfium 진단] ----------
 pdf_extract_text = None
 try:
@@ -449,27 +466,6 @@ def extract_clusters_by_type(text: str, kind: str) -> List[str]:
         if typ == kind:
             out += c
     return out
-
-
-# -------------------- ZIP 한글 파일명 표시 보정 --------------------
-def _zip_display_name(name: str) -> str:
-    """Windows-zip(cp949) 한글 파일명 깨짐 보정 (표시용). 원본 키는 그대로 유지."""
-    if not isinstance(name, str):
-        return str(name)
-    # 이미 정상(한글 포함)인 경우 그대로
-    try:
-        if re.search(r"[가-힣]", name):
-            return name
-    except Exception:
-        pass
-    # cp437 -> cp949 재해석
-    for dec in ("cp949", "euc-kr", "utf-8"):
-        try:
-            return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
-        except Exception:
-            continue
-    return name
-
 
 # -------------------- PDF 읽기/진단 --------------------
 def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
@@ -1025,6 +1021,28 @@ with st.sidebar:
 seed_kb_once()
 st.title("🧩 포스터 한 장으로 말하기 대본 완성")
 st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
+
+# --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
+import os as _os
+def _show_ci_logo():
+    candidates = [
+        "/mount/src/ops2tbm/mark-image.gif",
+        "/mnt/data/mark-image.gif",
+        "mark-image.gif",
+    ]
+    for pth in candidates:
+        try:
+            if _os.path.exists(pth):
+                st.image(pth, use_column_width=True)
+                return
+        except Exception:
+            pass
+    try:
+        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
+    except Exception:
+        pass
+_show_ci_logo()
+
 def reset_all():
     st.session_state.pop("manual_text", None)
     st.session_state.pop("edited_text", None)
@@ -1094,7 +1112,6 @@ with col1:
             if zip_pdfs:
                 chosen = st.selectbox("ZIP 내 PDF 선택", [_zip_display_name(nm) for nm in sorted(zip_pdfs.keys())], key="zip_choice")
                 if chosen:
-                    # map display name back to real key
                     real = None
                     for _nm in zip_pdfs.keys():
                         if _zip_display_name(_nm) == chosen:
