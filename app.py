@@ -1067,12 +1067,12 @@ def _show_ci_logo():
     for pth in candidates:
         try:
             if _os.path.exists(pth):
-                st.image(pth, use_column_width=True)
+                
 # return statement removed (incorrect placement)
         except Exception:
             pass
     try:
-        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
+        
     except Exception:
         pass
 _show_ci_logo()
