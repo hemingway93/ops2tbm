@@ -43,9 +43,12 @@ import numpy as np
 import regex as rxx
 import streamlit as st
 def _clean_doc_ids(s: str) -> str:
+
     import re
     s = re.sub(r"\b제?\s*\d{4}\s*[-–—_.]?\s*\d+\s*호\b", "", s)
     s = re.sub(r"[‘’“”']?\s*\d{4}\s*[-–—_/·]?\s*[가-힣A-Za-z]+(?:\s*[가-힣A-Za-z]+)*\s*[-–—_/·]?\s*\d+(?:\s*\d+)?\s*호\b", "", s)
+    s = re.sub(r"\b\d{4}\s*-\s*교육혁신실\s*-\s*", "", s)
+    s = re.sub(r"(다운로드\s*페이지|음원\s*\(국·?영문\)|원콜사업|스마트폰\s*텍스트)", "", s)
     s = re.sub(r"\s*[,)…]*\s*호\b", " 호", s)
     s = re.sub(r"\s{2,}", " ", s).strip()
     return s
@@ -1009,7 +1012,7 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-    __render_ci_logo()
+    _show_ci_logo()
     st.markdown("""
 **사용법 (간단 안내)**  
 1) PDF 또는 ZIP을 올립니다.  
@@ -1191,7 +1194,7 @@ with col2:
             with c3:
                 st.download_button(
                     "⬇️ TXT 다운로드",
-                    data=_xml_safe(script).encode("utf-8"),
+                    data=("\ufeff" + _xml_safe(script).replace("\n","\r\n")).encode("utf-8"),
                     file_name="tbm_output.txt",
                     use_container_width=True
                 )
@@ -1211,7 +1214,7 @@ for _ in range(140):
     # 주석 패딩(기능 영향 없음): 라인 수 유지용
     pass
 
-_show_ci_logo()
+
 
 def _fix_linebreaks(s: str) -> str:
     import re
@@ -1227,31 +1230,3 @@ def _fix_linebreaks(s: str) -> str:
     # Collapse triple newlines to double
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s
-
-# === appended helpers (non-destructive) ===
-def _clean_doc_ids(s: str) -> str:
-    import re
-    s = re.sub(r"\b제?\s*\d{4}\s*[-–—_.]?\s*\d+\s*호\b", "", s)
-    s = re.sub(r"[‘’“”']?\s*\d{4}\s*[-–—_/·]?\s*[가-힣A-Za-z]+(?:\s*[가-힣A-Za-z]+)*\s*[-–—_/·]?\s*\d+(?:\s*\d+)?\s*호\b", "", s)
-    s = re.sub(r"\b\d{4}\s*-\s*교육혁신실\s*-\s*", "", s)
-    s = re.sub(r"(다운로드\s*페이지|음원\s*\(국·?영문\)|원콜사업|스마트폰\s*텍스트)", "", s)
-    s = re.sub(r"\s*[,)…]*\s*호\b", " 호", s)
-    s = re.sub(r"\s{2,}", " ", s).strip()
-    return s
-
-def _fix_linebreaks(s: str) -> str:
-    import re
-    s = re.sub(r"[•]+", "-", s)
-    s = re.sub(r"\s*-\s*", "\n- ", s)
-    s = re.sub(r"\s*◎\s*", "\n\n◎ ", s)
-    s = re.sub(r"(?<!\n)([0-9]️⃣)", "\n\1", s)
-    s = re.sub(r"[ \t]{2,}", " ", s)
-    s = re.sub(r"\n{3,}", "\n\n", s)
-    return s
-
-def __render_ci_logo():
-    try:
-        _show_ci_logo()
-    except NameError:
-        pass
-
