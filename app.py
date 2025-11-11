@@ -1072,6 +1072,8 @@ def reset_all():
     st.session_state["seed_loaded"] = False
     st.session_state["last_file_diag"] = {}
     st.session_state["last_extracted_cache"] = ""
+    st.session_state.pop("generated_script", None)
+    st.session_state.pop("generated_subtitle", None)
     st.rerun()
 
 col_top1, col_top2 = st.columns([4,1])
@@ -1121,6 +1123,8 @@ with col1:
                     if extracted.strip():
                         st.session_state["edited_text"] = extracted
                         st.session_state["last_extracted_cache"] = extracted
+                        st.session_state.pop("generated_script", None)
+                        st.session_state.pop("generated_subtitle", None)
                     st.success(f"ZIP 감지: {len(zip_pdfs)}개 PDF, 첫 문서 자동 선택 → {_zip_display_name(first_name)}")
                 else:
                     st.error("ZIP 내에 PDF가 없습니다.")
@@ -1139,6 +1143,8 @@ with col1:
                     if extracted2.strip():
                         st.session_state["edited_text"] = extracted2
                         st.session_state["last_extracted_cache"] = extracted2
+                        st.session_state.pop("generated_script", None)
+                        st.session_state.pop("generated_subtitle", None)
 
         elif fname.endswith(".pdf"):
             extracted = read_pdf_text_from_bytes(raw_bytes, fname=fname)
@@ -1146,6 +1152,8 @@ with col1:
                 kb_ingest_text(extracted); kb_prune()
                 st.session_state["edited_text"] = extracted
                 st.session_state["last_extracted_cache"] = extracted
+                st.session_state.pop("generated_script", None)
+                st.session_state.pop("generated_subtitle", None)
             else:
                 st.warning("⚠️ PDF에서 유효한 텍스트를 추출할 수 없습니다.")
         else:
@@ -1156,6 +1164,8 @@ with col1:
         kb_ingest_text(pasted); kb_prune()
         st.session_state["edited_text"] = pasted
         st.session_state["last_extracted_cache"] = pasted
+        st.session_state.pop("generated_script", None)
+        st.session_state.pop("generated_subtitle", None)
 
     base_text = st.session_state.get("edited_text","")
     # # st.markdown("**추출/입력 텍스트 미리보기**")  # (hidden)  # UI 숨김(기능 유지)
@@ -1208,7 +1218,8 @@ if st.session_state.get("generated_script"):
     c3, c4 = st.columns(2)
     with c3:
         # Windows 메모장/한글 호환 위해 UTF-8 with BOM + CRLF
-        txt_bytes = _xml_safe(script).replace("\n", "\r\n").encode("utf-8-sig")
+        import unicodedata as _ud
+        txt_bytes = _ud.normalize("NFC", _xml_safe(script)).replace("\n", "\r\n").encode("utf-8-sig")
         st.download_button(
             "⬇️ TXT 다운로드",
             data=txt_bytes,
