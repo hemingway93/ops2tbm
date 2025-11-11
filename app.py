@@ -1120,7 +1120,7 @@ with col1:
                     kb_prune()
                     first_name = sorted(zip_pdfs.keys())[0]
                     extracted = read_pdf_text_from_bytes(zip_pdfs[first_name], fname=first_name)
-                    if extracted.strip():
+                    if extracted.strip() and extracted.strip() != (st.session_state.get("edited_text","") or "").strip():
                         st.session_state["edited_text"] = extracted
                         st.session_state["last_extracted_cache"] = extracted
                         st.session_state.pop("generated_script", None)
@@ -1141,7 +1141,7 @@ with col1:
                     extracted2 = ""
                     if real and zip_pdfs.get(real):
                         extracted2 = read_pdf_text_from_bytes(zip_pdfs[real], fname=real)
-                    if extracted2.strip():
+                    if extracted2.strip() and extracted2.strip() != (st.session_state.get("edited_text","") or "").strip():
                         st.session_state["edited_text"] = extracted2
                         st.session_state["last_extracted_cache"] = extracted2
                         st.session_state.pop("generated_script", None)
@@ -1149,7 +1149,7 @@ with col1:
 
         elif fname.endswith(".pdf"):
             extracted = read_pdf_text_from_bytes(raw_bytes, fname=fname)
-            if extracted.strip():
+            if extracted.strip() and extracted.strip() != (st.session_state.get("edited_text","") or "").strip():
                 kb_ingest_text(extracted); kb_prune()
                 st.session_state["edited_text"] = extracted
                 st.session_state["last_extracted_cache"] = extracted
@@ -1161,7 +1161,7 @@ with col1:
             st.warning("지원하지 않는 형식입니다. PDF 또는 ZIP을 업로드하세요.")
 
     pasted = (manual_text or "").strip()
-    if pasted:
+    if pasted and pasted != (st.session_state.get("edited_text","") or ""):
         kb_ingest_text(pasted); kb_prune()
         st.session_state["edited_text"] = pasted
         st.session_state["last_extracted_cache"] = pasted
