@@ -42,6 +42,15 @@ from typing import List, Dict, Tuple
 import numpy as np
 import regex as rxx
 import streamlit as st
+def _clean_doc_ids(s: str) -> str:
+    import re
+    s = re.sub(r"\b제?\s*\d{4}\s*[-–—_.]?\s*\d+\s*호\b", "", s)
+    s = re.sub(r"[‘’“”']?\s*\d{4}\s*[-–—_/·]?\s*[가-힣A-Za-z]+(?:\s*[가-힣A-Za-z]+)*\s*[-–—_/·]?\s*\d+(?:\s*\d+)?\s*호\b", "", s)
+    s = re.sub(r"\s*[,)…]*\s*호\b", " 호", s)
+    s = re.sub(r"\s{2,}", " ", s).strip()
+    return s
+
+
 from docx import Document
 from docx.shared import Pt
 from pathlib import Path
@@ -1033,12 +1042,12 @@ def _show_ci_logo():
     for pth in candidates:
         try:
             if _os.path.exists(pth):
-                st.image(pth, use_column_width=True)
+                st.sidebar.image(pth, width=240)
                 return
         except Exception:
             pass
     try:
-        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
+        st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=240)
     except Exception:
         pass
 _show_ci_logo()
@@ -1175,6 +1184,7 @@ with col2:
                     script = make_concise_report(text_for_gen, max_points=max_points)
                     subtitle = "핵심요약"
             st.success(f"생성 완료! ({subtitle})")
+            script = _clean_doc_ids(script)
             st.text_area("결과 미리보기", value=script, height=420)
             c3, c4 = st.columns(2)
             with c3:
