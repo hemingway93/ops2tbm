@@ -56,10 +56,12 @@ def _zip_display_name(name: str) -> str:
             return name
     except Exception:
         pass
+        pass
     for dec in ("cp949", "euc-kr", "utf-8"):
         try:
             return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
     except Exception:
+        pass
             continue
     return name
 
@@ -69,16 +71,19 @@ try:
     from pdfminer_high_level import extract_text as _wrong  # 방지: 과거 오타 경로
     del _wrong
     except Exception:
+        pass
     pass
 try:
     from pdfminer.high_level import extract_text as _extract_text
     pdf_extract_text = _extract_text
     except Exception:
+        pass
     pdf_extract_text = None
 
 try:
     import pypdfium2 as pdfium
     except Exception:
+        pass
     pdfium = None
 
 # ---------- [Streamlit UI 설정 — 레이아웃 유지] ----------
@@ -477,6 +482,7 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
         else:
             t = ""
     except Exception:
+        pass
         t = ""
     t = normalize_text(t)
     if len(t.strip()) < 10 and pdfium is not None:
@@ -486,6 +492,7 @@ def read_pdf_text_from_bytes(b: bytes, fname: str = "") -> str:
                 if t.strip() == "":
                     st.warning("⚠️ 이미지/스캔 PDF로 보입니다. 현재 OCR 미지원.")
     except Exception:
+        pass
             pass
     st.session_state["last_file_diag"] = {
         "name": fname, "size_bytes": len(b), "extracted_chars": len(t),
@@ -987,6 +994,7 @@ def to_docx_bytes(script: str) -> bytes:
         style = doc.styles["Normal"]; style.font.name = "Malgun Gothic"; style.font.size = Pt(11)
     except Exception:
         pass
+        pass
     for raw in script.split("\n"):
         line = _xml_safe(raw)
         p = doc.add_paragraph(line)
@@ -994,6 +1002,7 @@ def to_docx_bytes(script: str) -> bytes:
             try:
                 run.font.name = "Malgun Gothic"; run.font.size = Pt(11)
     except Exception:
+        pass
                 pass
     bio = io.BytesIO(); doc.save(bio); bio.seek(0)
     return bio.read()
@@ -1034,6 +1043,7 @@ def _show_ci_logo(width=120):
                 st.image(pth, width=width)
 # return statement removed (incorrect placement)
     except Exception:
+        pass
             pass
     # Fallback: Raw URL if file is not found
     st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
@@ -1070,9 +1080,11 @@ def _show_ci_logo():
                 
 # return statement removed (incorrect placement)
     except Exception:
+        pass
             pass
     try:
     except Exception:
+        pass
         pass
 _show_ci_logo()
 
@@ -1117,6 +1129,7 @@ with col1:
         try:
             raw_bytes = uploaded.getvalue()
     except Exception:
+        pass
             raw_bytes = uploaded.read()
 
         if fname.endswith(".zip"):
