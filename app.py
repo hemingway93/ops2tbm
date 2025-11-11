@@ -84,37 +84,6 @@ except Exception:
 # ---------- [Streamlit UI 설정 — 레이아웃 유지] ----------
 st.set_page_config(page_title="OPS2TBM", page_icon="🦺", layout="wide")
 
-
-
-# === [헤더: 로고+대제목+소제목 — 기능 변경 없음 / UI만] ===
-from pathlib import Path as _PathForLogo
-_LOGO_PATHS = ["mark-image.gif", "/app/mark-image.gif", "static/mark-image.gif", "assets/mark-image.gif"]
-_logo_src = None
-for _p in _LOGO_PATHS:
-    try:
-        if _PathForLogo(_p).exists():
-            _logo_src = _p
-            break
-    except Exception:
-        pass
-
-_hdr_col1, _hdr_col2 = st.columns([0.12, 0.88])
-with _hdr_col1:
-    if _logo_src:
-        st.image(_logo_src, width=72, clamp=True)
-with _hdr_col2:
-    st.markdown("""<div style="display:flex;flex-direction:column;gap:4px;">
-  <div style="font-size:34px;font-weight:800;line-height:1.1;">
-    포스터 한 장으로 말하기 대본 완성
-  </div>
-  <div style="font-size:20px;color:#444;">
-    OPS/포스터 문서를 TBM교육으로 자동 변환합니다
-  </div>
-</div>
-""", unsafe_allow_html=True)
-# === [/헤더] ===
-
-
 # -------------------- 시드 KB(정적) --------------------
 SEED_RISK_MAP = {
     "중독":"중독","떨어짐":"떨어짐","끼임":"끼임","질식":"질식","화재":"화재","깔림":"깔림",
@@ -162,6 +131,8 @@ def _init_once():
     ss.setdefault("seed_loaded", False)
     ss.setdefault("last_file_diag", {})
     ss.setdefault("last_extracted_cache", "")
+    ss.setdefault("generated_script", "")
+    ss.setdefault("generated_subtitle", "")
 _init_once()
 
 # -------------------- 한국어 조사/띄어쓰기 보정 --------------------
@@ -1012,25 +983,6 @@ def _xml_safe(s: str) -> str:
     if not isinstance(s, str): s = "" if s is None else str(s)
     return rxx.sub(_XML_FORBIDDEN, "", s)
 
-def _to_txt_safe(s: str) -> bytes:
-    """TXT 내보내기 전, 특수 이모지·이상문자를 ASCII 대체 + BOM(utf-8-sig) 인코딩."""
-    if not isinstance(s, str):
-        s = "" if s is None else str(s)
-    rep = {
-        "🦺": "[TBM] ",
-        "◎": "* ",
-        "①":"1) ","②":"2) ","③":"3) ","④":"4) ","⑤":"5) ","⑥":"6) ","⑦":"7) ","⑧":"8) ","⑨":"9) ",
-        "1️⃣":"1) ","2️⃣":"2) ","3️⃣":"3) ","4️⃣":"4) ","5️⃣":"5) ","6️⃣":"6) ","7️⃣":"7) ","8️⃣":"8) ","9️⃣":"9) ",
-        "·":"- ",
-        "■":"- ",
-        "▪":"- ",
-        "•":"- ",
-    }
-    for a,b in rep.items():
-        s = s.replace(a,b)
-    return s.encode("utf-8-sig")
-
-
 def to_docx_bytes(script: str) -> bytes:
     doc = Document()
     try:
@@ -1069,41 +1021,27 @@ with st.sidebar:
     )
 
 seed_kb_once()
-
-# --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
-import os as _os
-
-def _show_ci_logo(width=120):
-    candidates = [
-        "/mnt/data/mark-image.gif",  # local
-        "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
-    ]
-    for pth in candidates:
+def _resolve_ci_logo():
+    import os as _os
+    for _p in [
+        "/mount/src/ops2tbm/mark-image.gif",
+        "/mnt/data/mark-image.gif",
+        "mark-image.gif",
+    ]:
         try:
-            if _os.path.exists(pth):
-                st.image(pth, width=width)
-                return
+            if _os.path.exists(_p):
+                return _p
         except Exception:
             pass
-    # Fallback: Raw URL if file is not found
-# Title and logo (more space for logo)
-c_left, c_logo = st.columns([8, 2])  # More space for logo
-with c_left:
-    st.markdown(
-        "<div style='font-size:30px; font-weight:800; line-height:1.2;'>"
-        "포스터 한 장으로 말하기 대본 완성"
-        "</div>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        "<div style='font-size:20px; font-weight:600; margin-top:2px;'>"
-        "OPS/포스터 문서를 TBM교육으로 자동 변환합니다"
-        "</div>",
-        unsafe_allow_html=True
-    )
-with c_logo:
-    _show_ci_logo(width=120)  # Logo size adjustment (make bigger)
+    return "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
 
+logo_src = _resolve_ci_logo()
+col_logo, col_title = st.columns([0.08, 0.92])
+with col_logo:
+    st.image(logo_src, width=72)
+with col_title:
+    st.markdown("<div style='font-size:2.0rem;font-weight:700;line-height:1.1'>포스터 한 장으로 말하기 대본 완성</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:1.05rem;color:#666'>OPS/포스터 문서를 TBM교육으로 자동 변환합니다</div>", unsafe_allow_html=True)
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
 def _show_ci_logo():
@@ -1120,10 +1058,9 @@ def _show_ci_logo():
         except Exception:
             pass
     try:
+        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
     except Exception:
         pass
-_show_ci_logo()
-
 def reset_all():
     st.session_state.pop("manual_text", None)
     st.session_state.pop("edited_text", None)
@@ -1240,6 +1177,29 @@ with col2:
     max_points = st.slider("요약 강도(핵심문장 개수)", 3, 10, 6)
 
     if st.button("🛠️ 대본 생성", type="primary", use_container_width=True):
+    # --- 결과 프리뷰/다운로드(세션 유지) ---
+    if st.session_state.get("generated_script"):
+        script = st.session_state.get("generated_script", "")
+        subtitle = st.session_state.get("generated_subtitle", "")
+        st.text_area("결과 미리보기", value=script, height=420, key="result_preview")
+        c3, c4 = st.columns(2)
+        with c3:
+            # UTF-8 with BOM(utf-8-sig) + CRLF로 인코딩하여 메모장/한글에서 깨짐 방지
+            txt_bytes = _xml_safe(script).replace("\n", "\r\n").encode("utf-8-sig")
+            st.download_button(
+                "⬇️ TXT 다운로드",
+                data=txt_bytes,
+                file_name="tbm_output.txt",
+                use_container_width=True
+            )
+        with c4:
+            st.download_button(
+                "⬇️ DOCX 다운로드",
+                data=to_docx_bytes(script),
+                file_name="tbm_output.docx",
+                use_container_width=True
+            )
+
         text_for_gen = (st.session_state.get("edited_text") or "").strip()
         if not text_for_gen:
             text_for_gen = (st.session_state.get("last_extracted_cache") or "").strip()
@@ -1255,22 +1215,10 @@ with col2:
                 else:
                     script = make_concise_report(text_for_gen, max_points=max_points)
                     subtitle = "핵심요약"
+            st.session_state["generated_script"] = script
+            st.session_state["generated_subtitle"] = subtitle
             st.success(f"생성 완료! ({subtitle})")
-            st.session_state["last_script"] = script
-st.text_area("결과 미리보기", value=script, height=420)
-            c3, c4 = st.columns(2)
-            with c3:
-                st.download_button(
-                    "⬇️ TXT 다운로드",
-                    data=_to_txt_safe(st.session_state.get("last_script",""))).encode("utf-8"),
-                    file_name="tbm_output.txt",
-                    use_container_width=True
-                )
-            with c4:
-                st.download_button("⬇️ DOCX 다운로드", data=to_docx_bytes(st.session_state.get("last_script","")),
-                    file_name="tbm_output.docx",
-                    use_container_width=True
-                )
+            st.rerun()
 
 # 하단 안내 문구(“완전 무료” 표현 제거 → 사용된 AI 기법을 명시)
 st.caption("AI 기법: 전처리 + 불릿 클러스터링 + TextRank/MMR 요약 + 규칙형 NLG + 세션KB 가중 TF-IDF (LLM 미사용). 헤더 유무와 관계없이 사례/예방을 자동 추출합니다(섹션 파서·클러스터·Fallback).")
