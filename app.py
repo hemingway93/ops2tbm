@@ -164,19 +164,6 @@ def tidy_korean_spaces(s: str) -> str:
     s = re.sub(r"(작업\s*전\s*){2,}", "작업 전 ", s)
     s = re.sub(r"(반드시\s*){2,}", "반드시 ", s)
     return s.strip()
-def _finalize_sentence(s: str) -> str:
-    import re as _re
-    s = tidy_korean_spaces(s)
-    if _re.search(r"[.!?]$", s):
-        return s
-    return s + "."
-def _norm_text(s: str) -> str:
-    import re as _re
-    s = (s or "").strip()
-    s = _re.sub(r"\s+", " ", s)
-    return s
-
-
 
 # -------------------- 전처리 파이프라인 --------------------
 NOISE_PATTERNS = [
@@ -258,10 +245,6 @@ def strip_promo_inside(s: str) -> str:
 
 def strip_noise_line(line: str) -> str:
     s = (line or "").strip()
-    # 제거: 문장 내에 섞인 문서번호/제호 패턴
-    s = re.sub(r"제\s*\d{4}\s*[-–]\s*\d+\s*호", "", s)
-    s = re.sub(r"\b\d{4}\s*[-_]\s*[가-힣]{2,}\s*[-_]\s*\d+(?:\s*\d+\s*호)?\b", "", s)
-    s = s.strip()
     if not s: return ""
     s = re.sub(BULLET_PREFIX,"", s).strip()
     for pat in NOISE_PATTERNS:
@@ -945,7 +928,7 @@ def make_structured_script(text: str, max_points: int=6) -> str:
 
     if risks:
         lines.append("◎ 주요 위험요인")
-        for r in risks: lines.append(f"- {_finalize_sentence(r)}")
+        for r in risks: lines.append(f"- {r}")
         lines.append("")
 
     if acts:
@@ -1015,34 +998,6 @@ _XML_FORBIDDEN = r"[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]"
 def _xml_safe(s: str) -> str:
     if not isinstance(s, str): s = "" if s is None else str(s)
     return rxx.sub(_XML_FORBIDDEN, "", s)
-
-def sanitize_for_txt(s: str) -> str:
-    import re, unicodedata
-    s = unicodedata.normalize("NFKD", s)
-    circled_map = {
-        "①":"1)", "②":"2)", "③":"3)", "④":"4)", "⑤":"5)",
-        "⑥":"6)", "⑦":"7)", "⑧":"8)", "⑨":"9)", "⑩":"10)",
-        "❶":"1)", "❷":"2)", "❸":"3)", "❹":"4)", "❺":"5)",
-        "❻":"6)", "❼":"7)", "❽":"8)", "❾":"9)", "❿":"10)",
-        "⓪":"0)",
-    }
-    for k,v in circled_map.items():
-        s = s.replace(k, v)
-    replace_map = {
-        "🦺":"[TBM]", "📄":"", "✅":"-", "✔":"-", "✔️":"-",
-        "✖":"X", "✖️":"X", "❌":"X", "❎":"X",
-        "•":"-", "●":"-", "▪":"-", "◦":"-",
-        "▶":"-", "▷":"-", "▸":"-", "▹":"-",
-        "■":"-", "◆":"-", "◇":"-",
-    }
-    for k,v in replace_map.items():
-        s = s.replace(k, v)
-    s = s.replace("\u200d", "").replace("\ufe0e", "").replace("\ufe0f", "")
-    s = re.sub(r"[\u2600-\u27BF]", "", s)
-    s = re.sub(r"[\U0001F000-\U0001FAFF]", "", s)
-    s = re.sub(r"제\s*\d{4}\s*[-–]\s*\d+\s*호", "", s)
-    return s
-
 
 def to_docx_bytes(script: str) -> bytes:
     doc = Document()
@@ -1277,7 +1232,7 @@ with col2:
         c3, c4 = st.columns(2)
         with c3:
             # Windows 메모장/한글 호환 위해 UTF-8 with BOM + CRLF
-            txt_bytes = sanitize_for_txt(_xml_safe(script)).replace("\n", "\r\n").encode("utf-8-sig")
+            txt_bytes = _xml_safe(script).replace("\n", "\r\n").encode("utf-8-sig")
             st.download_button(
                 "⬇️ TXT 다운로드",
                 data=txt_bytes,
