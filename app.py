@@ -1197,8 +1197,6 @@ with col2:
             st.success(f"생성 완료! ({subtitle})")
             st.rerun()
 
-                    use_container_width=True
-                )
 
 # 하단 안내 문구(“완전 무료” 표현 제거 → 사용된 AI 기법을 명시)
 
