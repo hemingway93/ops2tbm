@@ -1016,7 +1016,8 @@ with st.sidebar:
     )
 
 seed_kb_once()
-st.title("🦺 OPS/포스터를 교육 대본으로 자동 변환")
+st.title("📘 포스터 한 장으로 말하기 대본 완성")
+st.subheader("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
 def reset_all():
     st.session_state.pop("manual_text", None)
@@ -1040,8 +1041,7 @@ st.markdown("**안내**  \n- 텍스트가 포함된 PDF 또는 본문 텍스트�
 col1, col2 = st.columns([1,1], gap="large")
 
 with col1:
-    uploaded = st.file_uploader(
-        "OPS 업로드 (PDF 또는 ZIP) • 텍스트 PDF 권장",
+    uploaded = st.file_uploader("📂 OPS/포스터 파일을 올려주세요",
         type=["pdf","zip"],
         key=f"uploader_{st.session_state['uploader_key']}"
     )
@@ -1111,8 +1111,8 @@ with col1:
         st.session_state["last_extracted_cache"] = pasted
 
     base_text = st.session_state.get("edited_text","")
-    st.markdown("**추출/입력 텍스트 미리보기**")
-    edited_text = st.text_area("텍스트", value=base_text, height=240, key="edited_text")
+    # st.markdown("**추출/입력 텍스트 미리보기**")  # UI 숨김(기능 유지)
+    edited_text = base_text  # UI 숨김(입력 위젯 미표시, 기존 값 사용)
 
     with st.expander("🧪 파일 읽기 진단(Log-lite)", expanded=False):
         diag = st.session_state.get("last_file_diag", {})
