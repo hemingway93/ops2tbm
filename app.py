@@ -1012,7 +1012,25 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-    _show_ci_logo()
+ # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
+import os as _os
+def _show_ci_logo():
+    candidates = [
+        "/mount/src/ops2tbm/mark-image.gif",
+        "/mnt/data/mark-image.gif",
+        "mark-image.gif",
+    ]
+    for pth in candidates:
+        try:
+            if _os.path.exists(pth):
+                st.sidebar.image(pth, width=240)
+                return
+        except Exception:
+            pass
+    try:
+        st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=240)
+    except Exception:
+        pass
     st.markdown("""
 **사용법 (간단 안내)**  
 1) PDF 또는 ZIP을 올립니다.  
@@ -1035,25 +1053,7 @@ seed_kb_once()
 st.title("📝 포스터 한 장으로 말하기 대본 완성")
 st.caption("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
 
-# --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
-import os as _os
-def _show_ci_logo():
-    candidates = [
-        "/mount/src/ops2tbm/mark-image.gif",
-        "/mnt/data/mark-image.gif",
-        "mark-image.gif",
-    ]
-    for pth in candidates:
-        try:
-            if _os.path.exists(pth):
-                st.sidebar.image(pth, width=240)
-                return
-        except Exception:
-            pass
-    try:
-        st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=240)
-    except Exception:
-        pass
+
 def reset_all():
     st.session_state.pop("manual_text", None)
     st.session_state.pop("edited_text", None)
