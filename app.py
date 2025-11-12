@@ -1004,7 +1004,7 @@ with st.sidebar:
 # --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
     import os as _os
 
-    def _show_ci_logo_in_sidebar(width=80):  # 사이드바 상단에 로고 배치
+    def _show_ci_logo_in_sidebar(width=150):  # 사이드바 상단에 로고 배치
         candidates = [
             "/mnt/data/mark-image.gif",  # local
             "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
@@ -1020,7 +1020,7 @@ with st.sidebar:
         st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
     
     # Title and logo (small logo on the sidebar)
-    _show_ci_logo_in_sidebar(width=100)  # 사이드바에 작은 로고 삽입
+    _show_ci_logo_in_sidebar(width=150)  # 사이드바에 작은 로고 삽입
 
     st.markdown("""
 **사용법 (간단 안내)**  
