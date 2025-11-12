@@ -1023,7 +1023,7 @@ seed_kb_once()
 # --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
 import os as _os
 
-def _show_ci_logo(width=20):
+def _show_ci_logo(width=120):
     candidates = [
         "/mnt/data/mark-image.gif",  # local
         "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
@@ -1038,7 +1038,28 @@ def _show_ci_logo(width=20):
     # Fallback: Raw URL if file is not found
     st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
 
+
 # Title and logo (more space for logo)
+import os as _os
+
+def _show_ci_logo_in_sidebar(width=80):  # 사이즈를 80으로 조정하여 사이드바에 넣기
+    candidates = [
+        "/mnt/data/mark-image.gif",  # local
+        "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
+    ]
+    for pth in candidates:
+        try:
+            if _os.path.exists(pth):
+                st.sidebar.image(pth, width=width)  # 사이드바에 이미지 넣기
+                return
+        except Exception:
+            pass
+    # Fallback: Raw URL if file is not found
+    st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
+
+# Title and logo (small logo on the sidebar)
+_show_ci_logo_in_sidebar(width=80)  # 사이드바에 작은 로고 삽입
+
 c_left, c_logo = st.columns([8, 2])  # More space for logo
 with c_left:
     st.markdown(
