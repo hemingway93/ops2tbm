@@ -1020,25 +1020,6 @@ with st.sidebar:
 
 seed_kb_once()
 
-# --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
-import os as _os
-
-def _show_ci_logo(width=120):
-    candidates = [
-        "/mnt/data/mark-image.gif",  # local
-        "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
-    ]
-    for pth in candidates:
-        try:
-            if _os.path.exists(pth):
-                st.image(pth, width=width)
-                return
-        except Exception:
-            pass
-    # Fallback: Raw URL if file is not found
-    st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
-
-
 
 # --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
 import os as _os
