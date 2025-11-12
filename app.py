@@ -1,3 +1,20 @@
+
+# -------------------- ZIP 한글 파일명 표시 보정 --------------------
+def _zip_display_name(name: str) -> str:
+    """Windows ZIP(cp949) -> Python cp437 decode mojibake: display fix only"""
+    if not isinstance(name, str):
+        return str(name)
+    try:
+        if re.search(r"[가-힣]", name):
+            return name
+    except Exception:
+        pass
+    for dec in ("cp949", "euc-kr", "utf-8"):
+        try:
+            return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
+        except Exception:
+            continue
+    return name
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
 # v2025-11-08-b (사이드바 문자열/들여쓰기 문법오류 수정)
