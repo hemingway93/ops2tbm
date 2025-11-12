@@ -1039,10 +1039,10 @@ def _show_ci_logo(width=120):
     st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
 
 
-# Title and logo (more space for logo)
+# --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
 import os as _os
 
-def _show_ci_logo_in_sidebar(width=80):  # 사이즈를 80으로 조정하여 사이드바에 넣기
+def _show_ci_logo_in_sidebar(width=80):  # 사이드바 상단에 로고 배치
     candidates = [
         "/mnt/data/mark-image.gif",  # local
         "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
@@ -1050,7 +1050,7 @@ def _show_ci_logo_in_sidebar(width=80):  # 사이즈를 80으로 조정하여 �
     for pth in candidates:
         try:
             if _os.path.exists(pth):
-                st.sidebar.image(pth, width=width)  # 사이드바에 이미지 넣기
+                st.sidebar.image(pth, width=width)  # 사이드바에 로고 넣기
                 return
         except Exception:
             pass
@@ -1059,6 +1059,22 @@ def _show_ci_logo_in_sidebar(width=80):  # 사이즈를 80으로 조정하여 �
 
 # Title and logo (small logo on the sidebar)
 _show_ci_logo_in_sidebar(width=80)  # 사이드바에 작은 로고 삽입
+
+# Remove logo from the main area by not including any _show_ci_logo() here.
+c_left, c_logo = st.columns([8, 2])  # This layout is for the title only, no logo here
+with c_left:
+    st.markdown(
+        "<div style='font-size:30px; font-weight:800; line-height:1.2;'>"
+        "포스터 한 장으로 말하기 대본 완성"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<div style='font-size:20px; font-weight:600; margin-top:2px;'>"
+        "OPS/포스터 문서를 TBM교육으로 자동 변환합니다"
+        "</div>",
+        unsafe_allow_html=True
+    )
 
 c_left, c_logo = st.columns([8, 2])  # More space for logo
 with c_left:
