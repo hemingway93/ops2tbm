@@ -228,11 +228,17 @@ def strip_promo_inside(s: str) -> str:
 def strip_noise_line(line: str) -> str:
     s = (line or "").strip()
     if not s: return ""
-    s = re.sub(BULLET_PREFIX,"", s).strip()
+    
+    # 문서 번호 제거: "2025-교육혁신실-212 5호"와 같은 형식
+    s = re.sub(r"\d{4}-\w+-\d{1,3}\s*\w*", "", s)  # 문서 번호 제거
+    
+    s = re.sub(BULLET_PREFIX, "", s).strip()
+    
     for pat in NOISE_PATTERNS:
         if re.search(pat, s, re.IGNORECASE):
             return ""
-    s = re.sub(r"https?://\S+","", s).strip()
+    
+    s = re.sub(r"https?://\S+", "", s).strip()
     s = strip_promo_inside(s)
     s = re.sub(r"(산업안전보건공단|안전보건공단|산업안전포털|안전보건포털)\s*$","", s).strip()
     s = re.sub(r"(사고사례)\s*$","", s).strip()
@@ -240,7 +246,9 @@ def strip_noise_line(line: str) -> str:
     s = re.sub(r"(안전작업방법|콘텐츠\s*링크|주요사고개요)$","", s).strip()
     s = re.sub(rf"{PROMO_TAIL}","", s).strip()
     s = tidy_korean_spaces(s)
+    
     return s
+
 
 def _looks_like_heading(s: str) -> bool:
     return bool(re.search(r"(방법|수칙|대책|안전조치|예방|작업방법|사고사례|주요\s*사고사례|사고개요)\s*[:：]?$", s))
