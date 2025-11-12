@@ -1021,7 +1021,7 @@ with st.sidebar:
 seed_kb_once()
 
 # Title only, no logo
-c_left, c_logo = st.columns([8, 2])  # Title part
+c_left = st.columns([8, 2])  # Title part
 with c_left:
     st.markdown(
         "<div style='font-size:30px; font-weight:800; line-height:1.2;'>"
