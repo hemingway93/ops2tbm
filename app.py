@@ -1040,7 +1040,7 @@ def _show_ci_logo(width=120):
 
 
 
-# Title and logo (more space for logo)
+# --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
 import os as _os
 
 def _show_ci_logo_in_sidebar(width=80):  # 사이드바 상단에 로고 배치
@@ -1061,7 +1061,7 @@ def _show_ci_logo_in_sidebar(width=80):  # 사이드바 상단에 로고 배치
 # Title and logo (small logo on the sidebar)
 _show_ci_logo_in_sidebar(width=80)  # 사이드바에 작은 로고 삽입
 
-# Remove logo from the main area by not including any _show_ci_logo() here.
+# Remove logo from the main area by not including any _show_ci_logo() or _show_ci_logo_in_sidebar() here.
 c_left, c_logo = st.columns([8, 2])  # This layout is for the title only, no logo here
 with c_left:
     st.markdown(
