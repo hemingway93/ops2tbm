@@ -1000,26 +1000,6 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-    st.markdown("""
-**사용법 (간단 안내)**  
-1) PDF 또는 ZIP을 올립니다.  
-2) 모드를 선택하고 **대본 생성**을 누릅니다.  
-3) 결과를 확인하고 **TXT/DOCX**로 저장합니다.  
-4) 이미지/스캔 PDF는 OCR 미지원입니다.
-""")
-    st.session_state["domain_toggle"] = st.toggle(
-        "🔧 도메인 템플릿 강화(신중 적용)",
-        value=False,
-        help="문장·본문 트리거 일치 + 유사도 기준 충족 시에만 템플릿을 소극적으로 적용합니다."
-    )
-    st.session_state["profile_km"] = st.toggle(
-        "🧾 키 메세지 모드(강건 파싱)",
-        value=True,
-        help="키 메세지(OPS) 포맷에서 날짜/체크표/홍보 꼬리를 더 엄격하게 처리합니다."
-    )
-
-seed_kb_once()
-
 
 # --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
 import os as _os
@@ -1041,6 +1021,26 @@ def _show_ci_logo_in_sidebar(width=80):  # 사이드바 상단에 로고 배치
 
 # Title and logo (small logo on the sidebar)
 _show_ci_logo_in_sidebar(width=80)  # 사이드바에 작은 로고 삽입
+
+    st.markdown("""
+**사용법 (간단 안내)**  
+1) PDF 또는 ZIP을 올립니다.  
+2) 모드를 선택하고 **대본 생성**을 누릅니다.  
+3) 결과를 확인하고 **TXT/DOCX**로 저장합니다.  
+4) 이미지/스캔 PDF는 OCR 미지원입니다.
+""")
+    st.session_state["domain_toggle"] = st.toggle(
+        "🔧 도메인 템플릿 강화(신중 적용)",
+        value=False,
+        help="문장·본문 트리거 일치 + 유사도 기준 충족 시에만 템플릿을 소극적으로 적용합니다."
+    )
+    st.session_state["profile_km"] = st.toggle(
+        "🧾 키 메세지 모드(강건 파싱)",
+        value=True,
+        help="키 메세지(OPS) 포맷에서 날짜/체크표/홍보 꼬리를 더 엄격하게 처리합니다."
+    )
+
+seed_kb_once()
 
 # Remove logo from the main area by not including any _show_ci_logo() or _show_ci_logo_in_sidebar() here.
 c_left, c_logo = st.columns([8, 2])  # This layout is for the title only, no logo here
