@@ -1075,44 +1075,6 @@ def _show_ci_logo_in_sidebar(width=80):  # 사이즈를 80으로 조정하여 �
     # Fallback: Raw URL if file is not found
     st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
 
-# Title and logo (small logo on the sidebar)
-_show_ci_logo_in_sidebar(width=80)  # 사이드바에 작은 로고 삽입
-
-c_left, c_logo = st.columns([8, 2])  # More space for logo
-with c_left:
-    st.markdown(
-        "<div style='font-size:30px; font-weight:800; line-height:1.2;'>"
-        "포스터 한 장으로 말하기 대본 완성"
-        "</div>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        "<div style='font-size:20px; font-weight:600; margin-top:2px;'>"
-        "OPS/포스터 문서를 TBM교육으로 자동 변환합니다"
-        "</div>",
-        unsafe_allow_html=True
-    )
-
-# --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
-import os as _os
-def _show_ci_logo():
-    candidates = [
-        "/mount/src/ops2tbm/mark-image.gif",
-        "/mnt/data/mark-image.gif",
-        "mark-image.gif",
-    ]
-    for pth in candidates:
-        try:
-            if _os.path.exists(pth):
-                st.image(pth, use_column_width=True)
-                return
-        except Exception:
-            pass
-    try:
-        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
-    except Exception:
-        pass
-_show_ci_logo()
 
 
 def reset_all():
