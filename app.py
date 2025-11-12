@@ -1004,7 +1004,7 @@ with st.sidebar:
 # --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
     import os as _os
 
-    def _show_ci_logo_in_sidebar(width=150):  # 사이드바 상단에 로고 배치
+    def _show_ci_logo_in_sidebar(width=200):  # 사이드바 상단에 로고 배치
         candidates = [
             "/mnt/data/mark-image.gif",  # local
             "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
@@ -1020,7 +1020,7 @@ with st.sidebar:
         st.sidebar.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
     
     # Title and logo (small logo on the sidebar)
-    _show_ci_logo_in_sidebar(width=150)  # 사이드바에 작은 로고 삽입
+    _show_ci_logo_in_sidebar(width=200)  # 사이드바에 작은 로고 삽입
 
     st.markdown("""
 **사용법 (간단 안내)**  
@@ -1046,13 +1046,13 @@ seed_kb_once()
 c_left, c_logo = st.columns([8, 2])  # This layout is for the title only, no logo here
 with c_left:
     st.markdown(
-        "<div style='font-size:30px; font-weight:850; line-height:1.2;'>"
+        "<div style='font-size:30px; font-weight:900; line-height:1.2;'>"
         "📘포스터 한 장으로 말하기 대본 완성"
         "</div>",
         unsafe_allow_html=True
     )
     st.markdown(
-        "<div style='font-size:20px; font-weight:650; margin-top:2px;'>"
+        "<div style='font-size:20px; font-weight:700; margin-top:2px;'>"
         "OPS/포스터 문서를 TBM교육으로 자동 변환합니다"
         "</div>",
         unsafe_allow_html=True
