@@ -46,24 +46,25 @@ from docx import Document
 from docx.shared import Pt
 from pathlib import Path
 
-# ---------- [PDF 텍스트 추출 계층 — pdfminer 우선 / pdfium 진단] ----------
-
-# OCR을 이용하여 이미지 PDF에서 텍스트를 추출하는 함수
-def ocr_extract_text_from_pdf(pdf_bytes: bytes) -> str:
+# -------------------- ZIP 한글 파일명 표시 보정 --------------------
+def _zip_display_name(name: str) -> str:
+    """Windows ZIP(cp949) -> Python cp437 decode mojibake: display fix only"""
+    if not isinstance(name, str):
+        return str(name)
     try:
-        image = Image.open(io.BytesIO(pdf_bytes))
-        text = pytesseract.image_to_string(image, lang='kor')  # 한국어 지원
-        return text
-    except Exception as e:
-        return f"OCR 처리 오류: {e}"
+        if re.search(r"[가-힣]", name):
+            return name
+    except Exception:
+        pass
+    for dec in ("cp949", "euc-kr", "utf-8"):
+        try:
+            return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
+        except Exception:
+            continue
+    return name
 
+# ---------- [PDF 텍스트 추출 계층 — pdfminer 우선 / pdfium 진단] ----------
 pdf_extract_text = None
-try:
-    from pdfminer.high_level import extract_text as _extract_text
-    pdf_extract_text = _extract_text
-except Exception:
-    pdf_extract_text = None
-
 try:
     from pdfminer_high_level import extract_text as _wrong  # 방지: 과거 오타 경로
     del _wrong
@@ -73,23 +74,7 @@ try:
     from pdfminer.high_level import extract_text as _extract_text
     pdf_extract_text = _extract_text
 except Exception:
-    
-# OCR을 이용하여 이미지 PDF에서 텍스트를 추출하는 함수
-def ocr_extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    try:
-        image = Image.open(io.BytesIO(pdf_bytes))
-        text = pytesseract.image_to_string(image, lang='kor')  # 한국어 지원
-        return text
-    except Exception as e:
-        return f"OCR 처리 오류: {e}"
-
-pdf_extract_text = None
-try:
-    from pdfminer.high_level import extract_text as _extract_text
-    pdf_extract_text = _extract_text
-except Exception:
     pdf_extract_text = None
-
 
 try:
     import pypdfium2 as pdfium
@@ -1015,27 +1000,13 @@ def to_docx_bytes(script: str) -> bytes:
 
 # -------------------- UI(기존 구성 유지 / 텍스트만 업데이트) --------------------
 with st.sidebar:
-    # sidebar block start (auto-fix)
-    # ---------- [공단 CI 로고 출력 — GitHub RAW + 로컬 Fallback] ----------
-    try:
-        RAW_CI = "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif"
-        LOCAL_CI = "/mnt/data/mark-image.gif"
-        ci_path = LOCAL_CI if Path(LOCAL_CI).exists() else RAW_CI
-        st.image(ci_path, use_column_width=True)
-    except Exception:
-        pass
-    pass
-    st.header("🧭 사용 방법")
     st.markdown("""
-    **AI 파이프라인(LLM-Free, OpenSource Only)**  
-    1) 전처리(노이즈 제거/줄 병합/날짜-사고 결합)  
-    2) **사례 블록 병합**(연결어·키워드로 연속 서술을 한 문장으로)  
-    3) **헤더 無여도** 불릿 클러스터 자동 분류(사례형/예방형)  
-    4) TextRank + MMR 요약 (**세션 KB 가중 TF-IDF**)  
-    5) 규칙형 NLG: 조사·띄어쓰기·종결 보정, **예방 수칙 줄결합/자연화**  
-    6) 결과 포맷: **자연스러운 교육대본** / **핵심요약**  
-    *NEW(11-08): 더미문구/숏츠/그림파일 꼬리 제거, “사고개요” 결합 금지, 조사·중복 보정 강화.*
-    """)
+**사용법 (간단 안내)**  
+1) PDF 또는 ZIP을 올립니다.  
+2) 모드를 선택하고 **대본 생성**을 누릅니다.  
+3) 결과를 확인하고 **TXT/DOCX**로 저장합니다.  
+4) 이미지/스캔 PDF는 OCR 미지원입니다.
+""")
     st.session_state["domain_toggle"] = st.toggle(
         "🔧 도메인 템플릿 강화(신중 적용)",
         value=False,
@@ -1048,8 +1019,62 @@ with st.sidebar:
     )
 
 seed_kb_once()
-st.title("📘 포스터 한 장으로 말하기 대본 완성")
-st.subheader("OPS/포스터 문서를 TBM교육으로 자동 변환합니다")
+
+# --- 기관 CI 로고 + 제목/소제목 (이모지 삭제 → 로고 인라인) ---
+import os as _os
+
+def _show_ci_logo(width=120):
+    candidates = [
+        "/mnt/data/mark-image.gif",  # local
+        "https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif",  # fallback to github raw
+    ]
+    for pth in candidates:
+        try:
+            if _os.path.exists(pth):
+                st.image(pth, width=width)
+                return
+        except Exception:
+            pass
+    # Fallback: Raw URL if file is not found
+    st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", width=width)
+
+# Title and logo (more space for logo)
+c_left, c_logo = st.columns([8, 2])  # More space for logo
+with c_left:
+    st.markdown(
+        "<div style='font-size:30px; font-weight:800; line-height:1.2;'>"
+        "포스터 한 장으로 말하기 대본 완성"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<div style='font-size:20px; font-weight:600; margin-top:2px;'>"
+        "OPS/포스터 문서를 TBM교육으로 자동 변환합니다"
+        "</div>",
+        unsafe_allow_html=True
+    )
+
+# --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
+import os as _os
+def _show_ci_logo():
+    candidates = [
+        "/mount/src/ops2tbm/mark-image.gif",
+        "/mnt/data/mark-image.gif",
+        "mark-image.gif",
+    ]
+    for pth in candidates:
+        try:
+            if _os.path.exists(pth):
+                st.image(pth, use_column_width=True)
+                return
+        except Exception:
+            pass
+    try:
+        st.image("https://raw.githubusercontent.com/hemingway93/ops2tbm/main/mark-image.gif", use_column_width=True)
+    except Exception:
+        pass
+_show_ci_logo()
+
 
 def reset_all():
     st.session_state.pop("manual_text", None)
@@ -1111,16 +1136,21 @@ with col1:
                     if extracted.strip():
                         st.session_state["edited_text"] = extracted
                         st.session_state["last_extracted_cache"] = extracted
-                    st.success(f"ZIP 감지: {len(zip_pdfs)}개 PDF, 첫 문서 자동 선택 → {first_name}")
+                    st.success(f"ZIP 감지: {len(zip_pdfs)}개 PDF, 첫 문서 자동 선택 → {_zip_display_name(first_name)}")
                 else:
                     st.error("ZIP 내에 PDF가 없습니다.")
             except Exception as e:
                 st.error(f"ZIP 해제 오류: {e}")
 
             if zip_pdfs:
-                chosen = st.selectbox("ZIP 내 PDF 선택", sorted(zip_pdfs.keys()), key="zip_choice")
-                if chosen and zip_pdfs.get(chosen):
-                    extracted2 = read_pdf_text_from_bytes(zip_pdfs[chosen], fname=chosen)
+                chosen = st.selectbox("ZIP 내 PDF 선택", [_zip_display_name(nm) for nm in sorted(zip_pdfs.keys())], key="zip_choice")
+                if chosen:
+                    real = None
+                    for _nm in zip_pdfs.keys():
+                        if _zip_display_name(_nm) == chosen:
+                            real = _nm; break
+                    if real and zip_pdfs.get(real):
+                        extracted2 = read_pdf_text_from_bytes(zip_pdfs[real], fname=real)
                     if extracted2.strip():
                         st.session_state["edited_text"] = extracted2
                         st.session_state["last_extracted_cache"] = extracted2
@@ -1143,7 +1173,7 @@ with col1:
         st.session_state["last_extracted_cache"] = pasted
 
     base_text = st.session_state.get("edited_text","")
-    # st.markdown("**추출/입력 텍스트 미리보기**")  # UI 숨김(기능 유지)
+    # # st.markdown("**추출/입력 텍스트 미리보기**")  # (hidden)  # UI 숨김(기능 유지)
     edited_text = base_text  # UI 숨김(입력 위젯 미표시, 기존 값 사용)
 
     with st.expander("🧪 파일 읽기 진단(Log-lite)", expanded=False):
