@@ -1020,22 +1020,6 @@ with st.sidebar:
 
 seed_kb_once()
 
-# Title only, no logo
-c_left = st.columns([8, 2])  # Title part
-with c_left:
-    st.markdown(
-        "<div style='font-size:30px; font-weight:800; line-height:1.2;'>"
-        "포스터 한 장으로 말하기 대본 완성"
-        "</div>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        "<div style='font-size:20px; font-weight:600; margin-top:2px;'>"
-        "OPS/포스터 문서를 TBM교육으로 자동 변환합니다"
-        "</div>",
-        unsafe_allow_html=True
-    )
-
 # --- 기관 CI 로고(로컬 우선, 없으면 GitHub RAW 폴백) ---
 import os as _os
 def _show_ci_logo():
