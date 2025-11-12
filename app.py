@@ -1,20 +1,3 @@
-
-# -------------------- ZIP 한글 파일명 표시 보정 --------------------
-def _zip_display_name(name: str) -> str:
-    """Windows ZIP(cp949) -> Python cp437 decode mojibake: display fix only"""
-    if not isinstance(name, str):
-        return str(name)
-    try:
-        if re.search(r"[가-힣]", name):
-            return name
-    except Exception:
-        pass
-    for dec in ("cp949", "euc-kr", "utf-8"):
-        try:
-            return name.encode("cp437", errors="ignore").decode(dec, errors="ignore")
-        except Exception:
-            continue
-    return name
 # ==========================================================
 # OPS2TBM — OPS/포스터 → TBM 교육 대본 자동 변환 (LLM-Free, OpenSource Only)
 # v2025-11-08-b (사이드바 문자열/들여쓰기 문법오류 수정)
@@ -64,7 +47,23 @@ from docx.shared import Pt
 from pathlib import Path
 
 # ---------- [PDF 텍스트 추출 계층 — pdfminer 우선 / pdfium 진단] ----------
+
+# OCR을 이용하여 이미지 PDF에서 텍스트를 추출하는 함수
+def ocr_extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    try:
+        image = Image.open(io.BytesIO(pdf_bytes))
+        text = pytesseract.image_to_string(image, lang='kor')  # 한국어 지원
+        return text
+    except Exception as e:
+        return f"OCR 처리 오류: {e}"
+
 pdf_extract_text = None
+try:
+    from pdfminer.high_level import extract_text as _extract_text
+    pdf_extract_text = _extract_text
+except Exception:
+    pdf_extract_text = None
+
 try:
     from pdfminer_high_level import extract_text as _wrong  # 방지: 과거 오타 경로
     del _wrong
@@ -74,7 +73,23 @@ try:
     from pdfminer.high_level import extract_text as _extract_text
     pdf_extract_text = _extract_text
 except Exception:
+    
+# OCR을 이용하여 이미지 PDF에서 텍스트를 추출하는 함수
+def ocr_extract_text_from_pdf(pdf_bytes: bytes) -> str:
+    try:
+        image = Image.open(io.BytesIO(pdf_bytes))
+        text = pytesseract.image_to_string(image, lang='kor')  # 한국어 지원
+        return text
+    except Exception as e:
+        return f"OCR 처리 오류: {e}"
+
+pdf_extract_text = None
+try:
+    from pdfminer.high_level import extract_text as _extract_text
+    pdf_extract_text = _extract_text
+except Exception:
     pdf_extract_text = None
+
 
 try:
     import pypdfium2 as pdfium
