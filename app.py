@@ -810,17 +810,23 @@ def fallback_extract_cases(text: str, sents: List[str]) -> List[str]:
     pool = stitch_case_blocks(pool)
     seen, out = set(), []
     for x in pool:
+        # 날짜 패턴이 두 번 이상 나타나면(= 서로 다른 사고가 한 문장에 섞인 경우) 제외
+        if len(re.findall(DATE_PAT, x)) > 1:
+            continue
+
         k = re.sub(r"\s+","", x)
         if k not in seen:
-            seen.add(k); out.append(x)
+            seen.add(k)
+            out.append(x)
     return out[:6]
+
 
 def fallback_extract_preventions(text: str, sents: List[str]) -> List[str]:
     from_cluster = extract_clusters_by_type(text, "action")
     from_sents = [x for x in sents if is_prevention_sentence(x)]
     pool = from_cluster + from_sents
     promo_pat = re.compile(
-        r"(OPS|VR|교안|교재|인포그래픽|포스터|스티커|위기탈출\s*안전보건|작업자를 위한|콘텐츠)"
+        r"(OPS|VR|교안|교재|인포그래픽|포스터|스티커|위기탈출\s*안전보건|작업자를 위한|콘텐츠|텍스트|스마트폰|APP|애플리케이션)"
     )
     pool = [p for p in pool if not promo_pat.search(p)]
     pool = repair_action_fragments(pool)
