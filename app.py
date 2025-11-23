@@ -182,8 +182,7 @@ NOISE_PATTERNS = [
 BULLET_PREFIX = r"^[\s\-\•\●\▪\▶\▷\·\*\u25CF\u25A0\u25B6\u25C6\u2022\u00B7\u279C\u27A4\u25BA\u25AA\u25AB\u2611\u2713\u2714\u2716\u2794\u27A2\u2717\u25FB\u25A1\u25A3\u25A2\u2610\u2612\u25FE\u25FD]+"
 DATE_PAT = r"([’']?\d{2,4})\.\s?(\d{1,2})\.\s?(\d{1,2})\.?"
 META_PATTERNS = [
-    r"<\s*\d+\s*명\s*사망\s*>", r"<\s*\d+\s*명\s*사상\s*>", r"<\s*\d+\s*명\s*의식불명\s*>",
-    r"<\s*사망\s*\d+\s*명\s*>", r"<\s*사상\s*\d+\s*>"
+    r"<\s*[^>]*?(사망|사상|부상|의식불명)[^>]*>"
 ]
 STOP_TERMS = set("""
 및 등 관련 사항 내용 예방 안전 작업 현장 교육 방법 기준 조치
@@ -193,14 +192,14 @@ STOP_TERMS = set("""
 소재 소재지 위치 장소 지역 시군구 서울 인천 부산 대구 대전 광주 울산 세종 경기도 충청 전라 경상 강원 제주
 명 건 호 호차 호수 페이지 쪽 부록 참고 그림 표 목차
 안전보건 ops 키 메세지 키메세지 자료 ops교안 교안
-텍스트 동영상 콘텐츠 숏츠 그림파일
+텍스트 동영상 콘텐츠 숏츠 그림파일 교재 인포그래픽 VR OPS
 """.split())
 LABEL_DROP_PAT = [
     r"^\d+$", r"^\d{2,4}[-_]\d{1,}$", r"^\d{4}$", r"^(제)?\d+호$", r"^(호|호수|호차)$",
     r"^(사업장|업체|소재|소재지|장소|지역)$", r"^\d+\s*(명|건)$"
 ]
 PREV_HINT = r"(예방|수칙|지침|안전조치|작업방법|허가|감시자|점검|차단|설치|준수|배치)"
-BUL_MARK = r"[✓✔]"
+BUL_MARK = r"[✓✔]"
 PROMO_TAIL = r"(동영상|교안|포털|검색|사이렌|공단)$"
 PROMO_MID = r"(‘?안전보건공단’?|산업안전보건공단|산업안전포털|안전보건포털|중대재해\s*사이렌|OPS|VR|동영상|교안|포털|검색|APP|애플리케이션)(?:\s*(보기|참조|검색|바로가기))?"
 ACCIDENT_PAT = r"(사망|사상|중독|추락|붕괴|낙하|질식|끼임|깔림|부딪힘|감전|폭발)(\s*추정)?"
@@ -242,6 +241,7 @@ def strip_noise_line(line: str) -> str:
     s = strip_promo_inside(s)
     s = re.sub(r"(산업안전보건공단|안전보건공단|산업안전포털|안전보건포털)\s*$","", s).strip()
     s = re.sub(r"(사고사례)\s*$","", s).strip()
+    s = re.sub(r"※\s*위\s*내용은\s*신고.*변경될\s*수\s*있음.*$","", s).strip()
     s = s.strip("•●▪▶▷·-—–,")
     s = re.sub(r"(안전작업방법|콘텐츠\s*링크|주요사고개요)$","", s).strip()
     s = re.sub(rf"{PROMO_TAIL}","", s).strip()
@@ -326,27 +326,44 @@ CASE_JOIN_TRIG = ("쓰러지자","구조하던 중","차례로","이어","이후
 CASE_KEYWORDS = ("사망","사상","중독","추락","붕괴","낙하","질식","끼임","깔림","부딪힘","감전","폭발","사고","사고개요")
 
 def stitch_case_blocks(sents: List[str]) -> List[str]:
-    if not sents: return sents
-    out = []; i = 0
+    if not sents:
+        return sents
+    out = []
+    i = 0
     while i < len(sents):
-        cur = sents[i].strip(); merged = cur; j = i + 1; merged_any = False
+        cur = sents[i].strip()
+        merged = cur
+        j = i + 1
+        merged_any = False
         while j < len(sents):
             nxt = sents[j].strip()
-            cond_keyword = (any(k in cur for k in CASE_KEYWORDS) and any(k in nxt for k in CASE_KEYWORDS))
+            cond_keyword = (
+                any(k in cur for k in CASE_KEYWORDS)
+                and any(k in nxt for k in CASE_KEYWORDS)
+            )
+            cur_date = re.search(DATE_PAT, cur)
+            nxt_date = re.search(DATE_PAT, nxt)
+            if cur_date and nxt_date and cur_date.group(0) != nxt_date.group(0):
+                cond_keyword = False
             cond_prev_like = bool(re.search(PREV_HINT, nxt)) or nxt.startswith("사고 개요")
             if cond_keyword and not cond_prev_like:
                 sep = ", " if not merged.endswith(("다.","습니다.","했다.",".")) else " "
                 merged = tidy_korean_spaces(merged.rstrip(" .") + sep + nxt.lstrip(" ,"))
-                cur = merged; j += 1; merged_any = True
+                cur = merged
+                j += 1
+                merged_any = True
             else:
                 break
-        out.append(merged); i = j if merged_any else i + 1
+        out.append(merged)
+        i = j if merged_any else i + 1
     seen, dedup = set(), []
     for s in out:
         k = re.sub(r"\s+","", s)
         if k not in seen:
-            seen.add(k); dedup.append(s)
+            seen.add(k)
+            dedup.append(s)
     return dedup
+
 
 def preprocess_text_to_sentences(text: str) -> List[str]:
     text = normalize_text(text)
@@ -758,26 +775,32 @@ def naturalize_case_sentence(s: str) -> str:
     inj = re.search(r"사상\s*(\d+)\s*명", s)
     unconscious = re.search(r"의식불명", s)
     info = []
-    if death: info.append(f"근로자 {death.group(1)}명 사망")
-    if inj and not death: info.append(f"{inj.group(1)}명 사상")
-    if unconscious: info.append("의식불명 발생")
-    m = re.search(DATE_PAT, s); date_txt=""
+    if death:
+        info.append(f"근로자 {death.group(1)}명 사망")
+    if inj and not death:
+        info.append(f"{inj.group(1)}명 사상")
+    if unconscious:
+        info.append("의식불명 발생")
+    m = re.search(DATE_PAT, s)
+    date_txt = ""
     if m:
         y, mo, d = m.groups()
-        y = int(str(y).replace("’","").replace("'","")); y = 2000 + y if y < 100 else y
+        y = int(str(y).replace("’","").replace("'",""))
+        y = 2000 + y if y < 100 else y
         date_txt = f"{int(y)}년 {int(mo)}월 {int(d)}일, "
         s = s.replace(m.group(0), "").strip()
     s = s.strip(" ,.-")
-    if not re.search(r"(다\.|입니다\.|했습니다\.)$", s):
+    if not re.search(r"(다\.|입니다\.|사고가 발생했습니다\.)$", s):
         if re.search(ACCIDENT_PAT + r"\s*$", s):
-            s = s.rstrip(" .") + "했습니다."
+            s = s.rstrip(" .") + " 사고가 발생했습니다."
         elif re.search(r"(사건|사고)\s*$", s):
             s = s.rstrip(" .") + "가 발생했습니다."
         else:
             s = s.rstrip(" .") + " 사고가 발생했습니다."
-    if info and not s.endswith("했습니다."):
+    if info and not s.endswith("사고가 발생했습니다.") and not s.endswith("했습니다."):
         s = tidy_korean_spaces(s.rstrip(" .") + " " + (", ".join(info)) + "했습니다.")
     return tidy_korean_spaces((date_txt + s).strip())
+
 
 # -------------------- Fallback 추출기 --------------------
 def fallback_extract_cases(text: str, sents: List[str]) -> List[str]:
@@ -796,14 +819,20 @@ def fallback_extract_preventions(text: str, sents: List[str]) -> List[str]:
     from_cluster = extract_clusters_by_type(text, "action")
     from_sents = [x for x in sents if is_prevention_sentence(x)]
     pool = from_cluster + from_sents
+    promo_pat = re.compile(
+        r"(OPS|VR|교안|교재|인포그래픽|포스터|스티커|위기탈출\s*안전보건|작업자를 위한|콘텐츠)"
+    )
+    pool = [p for p in pool if not promo_pat.search(p)]
     pool = repair_action_fragments(pool)
-    norm = [to_action_sentence(x, text) for x in pool if is_meaningful_sentence(x)]
+    norm = [y for y in (to_action_sentence(x, text) for x in pool if is_meaningful_sentence(x)) if y]
     seen, out = set(), []
     for x in norm:
         k = re.sub(r"\s+","", x)
         if k not in seen:
-            seen.add(k); out.append(x)
+            seen.add(k)
+            out.append(x)
     return out[:12]
+
 
 # -------------------- 라벨링 --------------------
 def drop_label_token(t: str) -> bool:
